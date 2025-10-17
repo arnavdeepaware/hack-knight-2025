@@ -1,0 +1,186 @@
+'use client';
+
+import React, { useState, useCallback } from 'react';
+import { CameraView } from '../components/CameraView';
+import { VoiceStatus } from '../components/VoiceStatus';
+import { AnalysisResults } from '../components/AnalysisResults';
+import { AutoCapture } from '../components/AutoCapture';
+import { useVoice } from '../hooks/useVoice';
+import { useVisionAnalysis } from '../hooks/useVisionAnalysis';
+import { Eye, Volume2, Settings, HelpCircle } from 'lucide-react';
+
+export default function HomePage() {
+  const [isAutoCaptureEnabled, setIsAutoCaptureEnabled] = useState(false);
+  
+  const {
+    isConnected: voiceConnected,
+    isSpeaking,
+    currentMessage,
+    error: voiceError,
+    testVoice,
+    stopSpeaking,
+  } = useVoice();
+
+  const {
+    isAnalyzing,
+    lastAnalysis,
+    analysisCount,
+    error: analysisError,
+    analyzeImage,
+    clearError,
+    resetAnalysis,
+  } = useVisionAnalysis();
+
+  const handlePhotoCapture = useCallback(async (blob: Blob) => {
+    try {
+      await analyzeImage(blob);
+    } catch (error) {
+      console.error('Error analyzing photo:', error);
+    }
+  }, [analyzeImage]);
+
+  const handleTestVoice = useCallback(async () => {
+    try {
+      await testVoice('Hello! This is a test of the voice guidance system. The system is working correctly.');
+    } catch (error) {
+      console.error('Error testing voice:', error);
+    }
+  }, [testVoice]);
+
+  const handleStopVoice = useCallback(() => {
+    stopSpeaking();
+  }, [stopSpeaking]);
+
+  const handleClearError = useCallback(() => {
+    clearError();
+  }, [clearError]);
+
+  const handleResetAnalysis = useCallback(() => {
+    resetAnalysis();
+  }, [resetAnalysis]);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
+                <Eye className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">Blind Assistance</h1>
+                <p className="text-sm text-gray-600">AI-Powered Voice Guidance</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <Volume2 className="w-4 h-4" />
+                <span>Analysis #{analysisCount}</span>
+              </div>
+              <button
+                onClick={handleResetAnalysis}
+                className="text-gray-500 hover:text-gray-700 transition-colors duration-200"
+                title="Reset Analysis"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column - Camera and Controls */}
+          <div className="space-y-6">
+            {/* Camera View */}
+            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+              <div className="p-4 border-b">
+                <h2 className="text-lg font-semibold text-gray-800 flex items-center">
+                  <Eye className="w-5 h-5 mr-2" />
+                  Camera View
+                </h2>
+              </div>
+              <div className="p-4">
+                <CameraView
+                  onPhotoCapture={handlePhotoCapture}
+                  className="h-96"
+                />
+              </div>
+            </div>
+
+            {/* Auto Capture */}
+            <AutoCapture
+              onPhotoCapture={handlePhotoCapture}
+              isAnalyzing={isAnalyzing}
+            />
+          </div>
+
+          {/* Right Column - Voice and Analysis */}
+          <div className="space-y-6">
+            {/* Voice Status */}
+            <VoiceStatus
+              isConnected={voiceConnected}
+              isSpeaking={isSpeaking}
+              currentMessage={currentMessage}
+              error={voiceError}
+              onTestVoice={handleTestVoice}
+              onStopVoice={handleStopVoice}
+            />
+
+            {/* Analysis Results */}
+            <AnalysisResults
+              analysis={lastAnalysis}
+              isAnalyzing={isAnalyzing}
+              analysisCount={analysisCount}
+              error={analysisError}
+              onClearError={handleClearError}
+            />
+          </div>
+        </div>
+
+        {/* Instructions */}
+        <div className="mt-8 bg-white rounded-lg shadow-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+            <HelpCircle className="w-5 h-5 mr-2" />
+            How to Use
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="font-medium text-gray-800 mb-2">Getting Started</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Click "Start Camera" to begin</li>
+                <li>• Allow camera permissions when prompted</li>
+                <li>• Position the camera to see your surroundings</li>
+                <li>• Click the camera button to capture a photo</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-gray-800 mb-2">Voice Guidance</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• All analysis results are spoken automatically</li>
+                <li>• Use "Test Voice" to verify audio is working</li>
+                <li>• Enable Auto Capture for continuous monitoring</li>
+                <li>• Use "Stop Speaking" to pause voice output</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-white border-t mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="text-center text-sm text-gray-600">
+            <p>Built with ❤️ for accessibility at Hack Knight 2025</p>
+            <p className="mt-1">Powered by Google Gemini AI and Web Speech API</p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
