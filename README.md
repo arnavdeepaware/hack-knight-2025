@@ -1,6 +1,6 @@
 # Blind Assistance - AI-Powered Voice Guidance
 
-A real-time voice guidance system for blind people using Google Gemini Multimodal API. The system continuously analyzes camera input and provides spoken descriptions of the environment, navigation guidance, and object identification.
+A real-time voice guidance system for blind people using Google Gemini Multimodal API. The system continuously analyzes camera input and provides spoken descriptions of the environment, naigation guidance, and object identification.
 
 ## 🌟 Features
 
