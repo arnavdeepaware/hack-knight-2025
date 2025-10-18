@@ -139,7 +139,7 @@ class ConversationParser:
     """Use Gemini to parse and respond to user input"""
     
     def __init__(self):
-        self.model = genai.GenerativeModel('gemini-pro')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.conversation_history = []
         
     def parse_intent(self, user_input: str, context: Dict) -> Dict:
@@ -147,31 +147,96 @@ class ConversationParser:
         Parse user intent and generate appropriate response
         Returns: {"intent": str, "response": str, "action": str}
         """
-        prompt = f"""You are VisionAid, an AI assistant for visually impaired users.
-Current context: {json.dumps(context)}
-User allergies: {', '.join(USER_PROFILE['allergies'])}
+        # Build context summary
+        context_summary = []
+        if context.get("current_item"):
+            item = context["current_item"]
+            context_summary.append(f"Currently holding: {item.get('name', 'unknown item')}")
+        if context.get("nutrition"):
+            nutrition = context["nutrition"]
+            context_summary.append(f"Nutrition label detected with allergens: {', '.join(nutrition.get('allergens', []))}")
+        
+        conversation_context = "\n".join([f"User: {h['user']}\nAI: {h['ai'].get('response', '')}" for h in self.conversation_history[-3:]])
+        
+        prompt = f"""You are VisionAid, a helpful AI assistant for visually impaired people who helps them identify food items and check for allergens.
 
-User says: "{user_input}"
+SYSTEM CONTEXT:
+User's known allergies: {', '.join(USER_PROFILE['allergies'])}
+Current situation: {' | '.join(context_summary) if context_summary else 'No item scanned yet'}
 
-Analyze the user's intent and respond appropriately. Return JSON with:
-- "intent": main intent (e.g., "identify_item", "nutrition_info", "allergy_check", "emergency")
-- "response": what VisionAid should say
-- "action": what action to take (e.g., "scan_item", "check_allergies", "call_emergency", "none")
+RECENT CONVERSATION:
+{conversation_context if conversation_context else 'No prior conversation'}
 
-Be empathetic, clear, and safety-focused. Keep responses concise."""
+USER'S CURRENT INPUT: "{user_input}"
+
+Your task: Understand what the user wants and respond naturally. Return ONLY valid JSON (no markdown):
+{{
+  "intent": "<intent_category>",
+  "response": "<what_to_say>",
+  "action": "<action_to_take>",
+  "emotion": "<normal|urgent|calm>"
+}}
+
+INTENT CATEGORIES:
+- "identify_item": User wants to know what they're holding
+- "nutrition_request": User wants nutrition information
+- "allergy_check": User asks if product is safe/has allergens
+- "emergency": User reports eating allergen or having reaction
+- "confirmation": User says yes/sure/okay to continue
+- "gratitude": User says thank you
+- "negative": User says no/nothing else
+- "general": Casual conversation
+
+ACTIONS:
+- "scan_item": Trigger camera to identify the item
+- "read_nutrition": Guide rotation and read nutrition label
+- "check_allergies": Check if allergens match user's profile
+- "call_emergency": Emergency alert system
+- "log_incident": Record health incident
+- "none": Just respond verbally
+
+GUIDELINES:
+- Be warm, helpful, and safety-focused
+- For emergencies, stay calm but act quickly
+- If user confirms/agrees after a question, proceed with context
+- Keep responses under 30 words unless critical safety info
+- Use emotion "urgent" only for emergencies, "calm" for reassurance"""
 
         try:
-            response = self.model.generate_content(prompt)
-            result = json.loads(response.text)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                )
+            )
+            
+            # Clean response text
+            response_text = response.text.strip()
+            # Remove markdown code fences if present
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
+            
+            result = json.loads(response_text)
             self.conversation_history.append({"user": user_input, "ai": result})
             return result
-        except Exception as e:
-            print(f"[GEMINI ERROR] {e}")
-            # Fallback response
+            
+        except json.JSONDecodeError as e:
+            print(f"[GEMINI JSON ERROR] {e}")
+            print(f"Raw response: {response.text if 'response' in locals() else 'No response'}")
             return {
                 "intent": "unknown",
-                "response": "I'm sorry, I didn't understand that. Could you repeat?",
-                "action": "none"
+                "response": "I'm listening. How can I help you?",
+                "action": "none",
+                "emotion": "normal"
+            }
+        except Exception as e:
+            print(f"[GEMINI ERROR] {e}")
+            return {
+                "intent": "unknown",
+                "response": "I'm sorry, I didn't catch that. Could you repeat?",
+                "action": "none",
+                "emotion": "normal"
             }
 
 # ============================================================================
@@ -213,26 +278,31 @@ class VisionAidSystem:
         self.context = {}
         
     def process_user_input(self, user_input: str):
-        """Process user speech input"""
+        """Process user speech input dynamically"""
         print(f"\n👤 User: {user_input}")
         
         # Parse intent with Gemini
         parsed = self.parser.parse_intent(user_input, self.context)
         intent = parsed.get("intent", "unknown")
         action = parsed.get("action", "none")
+        emotion = parsed.get("emotion", "normal")
+        response = parsed.get("response", "")
         
-        # Execute appropriate action
+        # Execute appropriate action based on parsed intent
         if action == "scan_item":
             self.scan_item()
-        elif action == "check_nutrition":
+        elif action == "read_nutrition":
             self.read_nutrition()
         elif action == "check_allergies":
-            self.check_allergies()
+            self.check_allergies_from_context(response, emotion)
         elif action == "call_emergency":
-            self.handle_emergency("Possible allergic reaction reported")
+            self.handle_emergency("User reports possible allergic reaction")
+        elif action == "log_incident":
+            self.log_incident()
         else:
-            # Just respond
-            self.voice.speak(parsed.get("response", "I'm listening."))
+            # Just respond with the generated text
+            if response:
+                self.voice.speak(response, emotion=emotion)
     
     def scan_item(self):
         """Scene 1: Identify item"""
@@ -261,7 +331,7 @@ class VisionAidSystem:
         self.voice.speak(f"This bar contains {ingredients_text}.")
     
     def check_allergies(self):
-        """Check for allergen matches"""
+        """Check for allergen matches - original method"""
         if "nutrition" not in self.context:
             self.voice.speak("I need to scan the nutrition label first.")
             return
@@ -281,6 +351,19 @@ class VisionAidSystem:
         else:
             self.voice.speak("Good news! I don't detect any of your known allergens in this product.")
     
+    def check_allergies_from_context(self, ai_response: str, emotion: str):
+        """Check allergies using AI-generated response"""
+        if "nutrition" not in self.context:
+            self.voice.speak("Let me scan the nutrition label first.", emotion="calm")
+            self.read_nutrition()
+            return
+        
+        # Use AI response if provided, otherwise default logic
+        if ai_response:
+            self.voice.speak(ai_response, emotion=emotion)
+        else:
+            self.check_allergies()
+    
     def handle_emergency(self, reason: str):
         """Scene 3: Emergency scenario"""
         self.voice.speak("Don't worry. I've detected a possible allergic emergency.", emotion="urgent")
@@ -297,14 +380,59 @@ class VisionAidSystem:
         self.voice.speak("Is there anything else I can do for you?")
 
 # ============================================================================
-# DEMO SCRIPT EXECUTION
+# INTERACTIVE MODE
+# ============================================================================
+
+def run_interactive_mode():
+    """Run VisionAid in interactive conversational mode"""
+    print("\n" + "="*60)
+    print("🎙️  VisionAid Interactive Mode")
+    print("="*60)
+    print("\nVisionAid is ready! Say what you need help with.")
+    print("Tips:")
+    print("  - 'What am I holding?' to identify an item")
+    print("  - 'Read the nutrition label' for details")
+    print("  - 'Am I allergic to this?' to check allergens")
+    print("  - Type 'quit' or 'exit' to stop")
+    print("\n" + "─"*60 + "\n")
+    
+    system = VisionAidSystem()
+    system.voice.speak("Hello! I'm VisionAid. How can I help you today?")
+    
+    while True:
+        try:
+            user_input = input("\n👤 You: ").strip()
+            
+            if not user_input:
+                continue
+            
+            if user_input.lower() in ['quit', 'exit', 'goodbye', 'bye']:
+                system.voice.speak("Goodbye! Remember, you're never alone when you can see with sound.")
+                break
+            
+            system.process_user_input(user_input)
+            time.sleep(0.5)  # Small pause for natural flow
+            
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupted by user.")
+            system.voice.speak("Goodbye!")
+            break
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            continue
+
+# ============================================================================
+# DEMO SCRIPT EXECUTION (for reference/testing)
 # ============================================================================
 
 def run_demo_script():
-    """Execute the full demo script"""
+    """Execute a sample demo following the original script flow"""
     print("\n" + "="*60)
-    print("🎬 VisionAid Prototype Demo Starting...")
-    print("="*60 + "\n")
+    print("🎬 VisionAid Demo Script")
+    print("="*60)
+    print("This simulates the interaction from the original script.")
+    print("For interactive mode, restart with interactive=True")
+    print("\n" + "─"*60 + "\n")
     
     system = VisionAidSystem()
     
@@ -322,7 +450,6 @@ def run_demo_script():
     print("SCENE 2: Nutrition Info & Allergy Check")
     print("─"*60)
     
-    system.read_nutrition()
     time.sleep(1)
     system.process_user_input("I'm allergic to nuts. Should I be worried?")
     system.check_allergies()
@@ -362,12 +489,23 @@ def run_demo_script():
 
 if __name__ == "__main__":
     print("VisionAid Prototype")
-    print("Python 3.9.13 | ElevenLabs + Google Gemini")
+    print("Python 3.10+ | ElevenLabs + Google Gemini")
     print("\nNote: Set ELEVENLABS_API_KEY environment variable for actual TTS.")
     print("Currently using text-based simulation.\n")
     
+    # Choose mode
+    print("Choose mode:")
+    print("  1. Interactive Mode (type your own messages)")
+    print("  2. Demo Script Mode (runs predefined script)")
+    
     try:
-        run_demo_script()
+        choice = input("\nEnter 1 or 2 (default: 1): ").strip()
+        
+        if choice == "2":
+            run_demo_script()
+        else:
+            run_interactive_mode()
+            
     except KeyboardInterrupt:
         print("\n\n⚠️  Demo interrupted by user.")
     except Exception as e:
