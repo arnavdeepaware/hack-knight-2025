@@ -30,8 +30,8 @@ import google.generativeai as genai
 # CONFIG
 # -----------------------------------------------------------------------------
 # Prefer environment variables; fallback to literal placeholders.
-GEMINI_API_KEY = "AIzaSyCIki8khizgP0Zk2Y7XyetaR5t_c1fjzok"
-ELEVENLABS_API_KEY = "sk_c4fce17d13ebee46deb92241237b089c4c2e716724f329b8"
+GEMINI_API_KEY = "AIzaSyBqEEsfEPPGIN-fU39yRlBdj945HeNtyeI"
+ELEVENLABS_API_KEY = "sk_94f0c1bdddb7708a716f144946a9f543531cee997f5b5d4a"
 
 if not GEMINI_API_KEY or "YOUR_GEMINI_KEY_HERE" in GEMINI_API_KEY:
     print("⚠️  Set GEMINI_API_KEY env var or paste your key into GEMINI_API_KEY.")
@@ -40,7 +40,7 @@ if not ELEVENLABS_API_KEY or "YOUR_ELEVENLABS_KEY_HERE" in ELEVENLABS_API_KEY:
 
 # Configure Gemini (use fast model for hackathons)
 genai.configure(api_key=GEMINI_API_KEY)
-MODEL_ID = "gemini-1.5-flash"  # or "gemini-pro" if you prefer
+MODEL_ID = "gemini-2.5-flash"  # or "gemini-pro" if you prefer
 model = genai.GenerativeModel(MODEL_ID)
 
 # ElevenLabs voices
