@@ -24,4 +24,10 @@ router.post('/voice/stop', visionController.stopVoice);
 // POST /api/vision/packaged-food - Extract packaged food details as JSON
 router.post('/packaged-food', upload.single('image'), visionController.analyzePackagedFood);
 
+// POST /api/vision/produce - Analyze fresh produce
+router.post('/produce', upload.single('image'), visionController.analyzeProduce);
+
+// POST /api/vision/store-section - Analyze store section layout
+router.post('/store-section', upload.single('image'), visionController.analyzeStoreSection);
+
 export default router;
