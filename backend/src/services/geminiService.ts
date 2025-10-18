@@ -1,6 +1,51 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config';
 
+export interface NutritionFacts {
+  calories?: string | number | null;
+  servingSize?: string | null;
+  fat?: string | null;
+  saturatedFat?: string | null;
+  transFat?: string | null;
+  cholesterol?: string | null;
+  sodium?: string | null;
+  carbohydrates?: string | null;
+  fiber?: string | null;
+  sugars?: string | null;
+  addedSugars?: string | null;
+  protein?: string | null;
+}
+
+export interface PackagedFoodResult {
+  status: 'ok' | 'uncertain' | 'not_visible';
+  product: {
+    brand: string | null;
+    item: string | null;
+    quantity: string | null; // e.g., "500g", "12 oz", "2L"
+    ingredients: string[] | null; // null if not readable
+  };
+  nutritionFacts?: NutritionFacts | null; // present only if facts panel is readable
+  notes?: string | null; // optional clarifications like "partially occluded"
+}
+
+function stripCodeFences(s: string) {
+  return s
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+}
+
+function safeParseLLMJson(s: string): any {
+  const cleaned = stripCodeFences(s);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Try to salvage common issues like trailing commas
+    const relaxed = cleaned.replace(/,\s*([}\]])/g, '$1');
+    return JSON.parse(relaxed);
+  }
+}
+
 export class GeminiService {
   private genAI: GoogleGenerativeAI;
   private model: any;
@@ -10,7 +55,7 @@ export class GeminiService {
       throw new Error('GEMINI_API_KEY is required');
     }
     this.genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   }
 
   async analyzeImage(imageBuffer: Buffer): Promise<string> {
@@ -122,6 +167,126 @@ Keep answers under 60 words. Prefer direct, helpful responses.`;
     } catch (error) {
       console.error('Error answering question with Gemini:', error);
       throw new Error('Failed to answer question');
+    }
+  }
+
+  async analyzePackagedFood(imageBuffer: Buffer): Promise<PackagedFoodResult> {
+    try {
+      const imageData = {
+        inlineData: {
+          data: imageBuffer.toString('base64'),
+          mimeType: 'image/jpeg',
+        },
+      };
+
+      const schemaHint = `
+Return ONLY JSON with this exact shape and no extra text:
+
+{
+  "status": "ok" | "uncertain" | "not_visible",
+  "product": {
+    "brand": string | null,
+    "item": string | null,
+    "quantity": string | null,
+    "ingredients": string[] | null
+  },
+  "nutritionFacts": {
+    "calories": string | number | null,
+    "servingSize": string | null,
+    "fat": string | null,
+    "saturatedFat": string | null,
+    "transFat": string | null,
+    "cholesterol": string | null,
+    "sodium": string | null,
+    "carbohydrates": string | null,
+    "fiber": string | null,
+    "sugars": string | null,
+    "addedSugars": string | null,
+    "protein": string | null
+  } | null,
+  "notes": string | null
+}
+
+Rules:
+- Extract only what is VISIBLE in the image. Do not guess.
+- If label is too unclear to read any product-specific info, set "status": "not_visible" and use notes like "cannot see clearly".
+- If partially readable, set "status": "uncertain" and fill known fields; unknown fields must be null.
+- "ingredients" must be an array of visible ingredient words if readable; otherwise null.
+- If a Nutrition Facts panel is VISIBLE and readable, include "nutritionFacts" with whatever fields are readable; otherwise set it to null.
+- For numbers like calories you may return a number (e.g., 180). For others keep units as text (e.g., "12g").
+- Output strictly JSON, no markdown.`;
+
+      // Use a JSON-forcing config for this call
+      const jsonModel = this.genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: {
+          temperature: 0.2,
+        },
+      });
+
+      const result = await jsonModel.generateContent([
+        {
+          text: `You are analyzing a PACKAGED FOOD product label for accessibility.
+
+Tasks:
+1) Product: brand (manufacturer), item/name (what it is), quantity/size if visible, ingredients list if visible.
+2) Nutrition Facts: if the nutrition panel is visible, extract key fields (calories, serving size, fat, carbs, protein, sugar, sodium, etc.) that can be read.
+
+${schemaHint}`,
+        },
+        imageData,
+      ]);
+
+      const response = await result.response;
+      const text = response.text();
+
+      const parsed = safeParseLLMJson(text) as PackagedFoodResult;
+
+      // Minimal post-validate and normalize
+      if (!parsed || !parsed.product) {
+        return {
+          status: 'not_visible',
+          product: { brand: null, item: null, quantity: null, ingredients: null },
+          nutritionFacts: null,
+          notes: 'cannot see clearly',
+        };
+      }
+
+      // Ensure fields exist even if model omitted some
+      parsed.status = parsed.status ?? 'uncertain';
+      parsed.product = {
+        brand: parsed.product.brand ?? null,
+        item: parsed.product.item ?? null,
+        quantity: parsed.product.quantity ?? null,
+        ingredients: Array.isArray(parsed.product.ingredients)
+          ? parsed.product.ingredients
+          : null,
+      };
+  if (parsed.nutritionFacts === undefined) parsed.nutritionFacts = null;
+  if (parsed.notes === undefined) parsed.notes = null;
+
+      // If nothing readable, flip to not_visible
+      const hasAny =
+        parsed.product.brand ||
+        parsed.product.item ||
+        parsed.product.quantity ||
+        (parsed.product.ingredients && parsed.product.ingredients.length > 0) ||
+        (parsed.nutritionFacts &&
+          Object.values(parsed.nutritionFacts).some(v => v !== null && v !== ''));
+      if (!hasAny) {
+        parsed.status = 'not_visible';
+        parsed.notes = parsed.notes || 'cannot see clearly';
+      }
+
+      return parsed;
+    } catch (error) {
+      console.error('Error analyzing packaged food with Gemini:', error);
+      return {
+        status: 'not_visible',
+        product: { brand: null, item: null, quantity: null, ingredients: null },
+        nutritionFacts: null,
+        notes: 'cannot see clearly',
+      };
     }
   }
 }

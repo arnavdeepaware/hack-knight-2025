@@ -16,7 +16,7 @@ export const useCamera = () => {
     error: null,
     stream: null,
     isLiveAnalysis: false,
-    analysisInterval: 3, // seconds
+  analysisInterval: 6.5, // seconds
   });
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -235,7 +235,7 @@ export const useCamera = () => {
     });
   }, []);
 
-  const startLiveAnalysis = useCallback((onFrameCapture: (blob: Blob) => void, interval: number = 3) => {
+  const startLiveAnalysis = useCallback((onFrameCapture: (blob: Blob) => void, interval: number = 6.5) => {
     if (!cameraState.isActive || cameraState.isLiveAnalysis) {
       return;
     }
@@ -267,7 +267,7 @@ export const useCamera = () => {
     captureFrame();
 
     // Set up interval for continuous capture
-    liveAnalysisRef.current = setInterval(captureFrame, interval * 1000);
+  liveAnalysisRef.current = setInterval(captureFrame, interval * 1000);
   }, [cameraState.isActive, cameraState.isLiveAnalysis, capturePhotoAsBlob]);
 
   const stopLiveAnalysis = useCallback(() => {
@@ -285,29 +285,59 @@ export const useCamera = () => {
   }, []);
 
   const updateAnalysisInterval = useCallback((newInterval: number) => {
-    setCameraState(prev => ({
-      ...prev,
-      analysisInterval: newInterval,
-    }));
+    setCameraState(prev => {
+      const wasActive = prev.isLiveAnalysis;
+      
+      // Stop current interval if active
+      if (wasActive && liveAnalysisRef.current) {
+        clearInterval(liveAnalysisRef.current);
+        liveAnalysisRef.current = null;
+      }
 
-    // If live analysis is active, restart with new interval
-    if (cameraState.isLiveAnalysis) {
-      stopLiveAnalysis();
-      setTimeout(() => {
-        if (onFrameCaptureRef.current) {
-          startLiveAnalysis(onFrameCaptureRef.current, newInterval);
-        }
-      }, 100);
-    }
-  }, [cameraState.isLiveAnalysis, stopLiveAnalysis, startLiveAnalysis]);
+      // Update interval
+      const newState = {
+        ...prev,
+        analysisInterval: newInterval,
+      };
+
+      // Restart with new interval if was active
+      if (wasActive && onFrameCaptureRef.current) {
+        setTimeout(() => {
+          const captureFrame = async () => {
+            if (!onFrameCaptureRef.current) return;
+            try {
+              const blob = await capturePhotoAsBlob();
+              if (blob) {
+                onFrameCaptureRef.current(blob);
+              }
+            } catch (error) {
+              console.error('Error capturing frame for live analysis:', error);
+            }
+          };
+
+          captureFrame();
+          liveAnalysisRef.current = setInterval(captureFrame, newInterval * 1000);
+        }, 100);
+      }
+
+      return newState;
+    });
+  }, [capturePhotoAsBlob]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopLiveAnalysis();
-      stopCamera();
+      // Clean up intervals
+      if (liveAnalysisRef.current) {
+        clearInterval(liveAnalysisRef.current);
+      }
+      
+      // Stop camera stream
+      if (cameraState.stream) {
+        cameraState.stream.getTracks().forEach(track => track.stop());
+      }
     };
-  }, [stopLiveAnalysis, stopCamera]);
+  }, []); // Empty deps - only run on mount/unmount
 
   return {
     ...cameraState,

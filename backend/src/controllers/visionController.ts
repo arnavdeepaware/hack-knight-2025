@@ -2,10 +2,12 @@ import { Request, Response } from 'express';
 import sharp from 'sharp';
 import geminiService from '../services/geminiService';
 import voiceService from '../services/voiceService';
+import multer from 'multer';
 
 // Throttling for live analysis
 const lastAnalysisTime = new Map<string, number>();
 const ANALYSIS_THROTTLE_MS = 2000; // Minimum 2 seconds between analyses per session
+const upload = multer();
 
 export class VisionController {
   async analyzeImage(req: Request, res: Response) {
@@ -155,6 +157,25 @@ export class VisionController {
       console.error('Error in analyzeLiveFrame:', error);
       // Don't speak error for live mode to avoid spam
       res.status(500).json({ error: 'Failed to analyze live frame' });
+    }
+  }
+
+  async analyzePackagedFood(req: Request, res: Response) {
+    try {
+      const file: Express.Multer.File | undefined = req.file;
+      if (!file || !file.buffer) {
+        return res.status(400).json({ error: 'Image is required' });
+      }
+      const result = await geminiService.analyzePackagedFood(file.buffer);
+      return res.json(result);
+    } catch (e) {
+      console.error('Error in analyzePackagedFood:', e);
+      return res.status(500).json({
+        status: 'not_visible',
+        product: { brand: null, item: null, quantity: null, ingredients: null },
+        nutritionFacts: null,
+        notes: 'cannot see clearly',
+      });
     }
   }
 }

@@ -11,6 +11,7 @@ import { useVoice } from '../hooks/useVoice';
 import { useVisionAnalysis } from '../hooks/useVisionAnalysis';
 import { useCamera } from '../hooks/useCamera';
 import { Eye, Volume2, Settings, HelpCircle } from 'lucide-react';
+import PackagedFoodResults from '../components/PackagedFoodResults';
 
 export default function HomePage() {
   const [isAutoCaptureEnabled, setIsAutoCaptureEnabled] = useState(false);
@@ -32,6 +33,8 @@ export default function HomePage() {
     analyzeImage,
     askQuestion,
     analyzeLiveFrame,
+    analyzePackagedFood,
+    lastPackagedFood,
     clearError,
     resetAnalysis,
   } = useVisionAnalysis();
@@ -65,6 +68,16 @@ export default function HomePage() {
   const handleStopVoice = useCallback(() => {
     stopSpeaking();
   }, [stopSpeaking]);
+
+  const handleAnalyzePackagedFood = useCallback(async () => {
+    try {
+      const blob = await camera.capturePhotoAsBlob();
+      if (!blob) return;
+      await analyzePackagedFood(blob);
+    } catch (e) {
+      console.error('Error analyzing packaged food:', e);
+    }
+  }, [camera.capturePhotoAsBlob, analyzePackagedFood]);
 
   const handleClearError = useCallback(() => {
     clearError();
@@ -126,6 +139,14 @@ export default function HomePage() {
                   onPhotoCapture={handlePhotoCapture}
                   className="h-96"
                 />
+                <div className="mt-4 flex gap-3">
+                  <button
+                    onClick={handleAnalyzePackagedFood}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                  >
+                    Analyze Packaged Food
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -168,6 +189,9 @@ export default function HomePage() {
               error={analysisError}
               onClearError={handleClearError}
             />
+
+            {/* Packaged Food Results */}
+            <PackagedFoodResults data={lastPackagedFood} isAnalyzing={isAnalyzing} />
           </div>
         </div>
 

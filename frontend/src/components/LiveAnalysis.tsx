@@ -43,11 +43,11 @@ export const LiveAnalysis: React.FC<LiveAnalysisProps> = ({
     }
   }, [camera]);
 
-  const handleIntervalChange = useCallback((newInterval: number) => {
+  const handleIntervalChange = (newInterval: number) => {
     if (camera) {
       camera.updateAnalysisInterval(newInterval);
     }
-  }, [camera]);
+  };
 
   // Update countdown when analysis is triggered
   useEffect(() => {
@@ -70,9 +70,11 @@ export const LiveAnalysis: React.FC<LiveAnalysisProps> = ({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopLiveAnalysis();
+      if (camera) {
+        camera.stopLiveAnalysis();
+      }
     };
-  }, [stopLiveAnalysis]);
+  }, []); // Empty deps - only run on unmount
 
   const formatTimeAgo = (date: Date) => {
     const now = new Date();

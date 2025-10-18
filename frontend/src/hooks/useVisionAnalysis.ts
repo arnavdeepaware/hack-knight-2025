@@ -12,9 +12,38 @@ interface VisionState {
   lastAnalysis: AnalysisResult | null;
   error: string | null;
   analysisCount: number;
+  lastPackagedFood: PackagedFoodResult | null;
 }
 
 const API_BASE_URL = 'http://localhost:3001/api/vision';
+
+// Types aligned with backend for packaged food
+export interface NutritionFacts {
+  calories?: string | number | null;
+  servingSize?: string | null;
+  fat?: string | null;
+  saturatedFat?: string | null;
+  transFat?: string | null;
+  cholesterol?: string | null;
+  sodium?: string | null;
+  carbohydrates?: string | null;
+  fiber?: string | null;
+  sugars?: string | null;
+  addedSugars?: string | null;
+  protein?: string | null;
+}
+
+export interface PackagedFoodResult {
+  status: 'ok' | 'uncertain' | 'not_visible';
+  product: {
+    brand: string | null;
+    item: string | null;
+    quantity: string | null;
+    ingredients: string[] | null;
+  };
+  nutritionFacts?: NutritionFacts | null;
+  notes?: string | null;
+}
 
 export const useVisionAnalysis = () => {
   const [visionState, setVisionState] = useState<VisionState>({
@@ -22,6 +51,7 @@ export const useVisionAnalysis = () => {
     lastAnalysis: null,
     error: null,
     analysisCount: 0,
+    lastPackagedFood: null,
   });
 
   const analyzeImage = useCallback(async (imageBlob: Blob) => {
@@ -175,6 +205,42 @@ export const useVisionAnalysis = () => {
     }
   }, []);
 
+  // Analyze Packaged Food
+  const analyzePackagedFood = useCallback(async (imageBlob: Blob) => {
+    try {
+      setVisionState(prev => ({ ...prev, isAnalyzing: true, error: null }));
+
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'packaged-food.jpg');
+
+      const response = await axios.post(`${API_BASE_URL}/packaged-food`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      const result: PackagedFoodResult = response.data;
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: false,
+        lastPackagedFood: result,
+        error: null,
+      }));
+
+      return result;
+    } catch (error) {
+      console.error('Error analyzing packaged food:', error);
+      let errorMessage = 'Could not extract packaged food info';
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 413) errorMessage = 'Image too large.';
+        else if (error.response?.status === 400) errorMessage = 'Invalid image.';
+        else if (error.code === 'ECONNABORTED') errorMessage = 'Request timed out.';
+        else if (error.code === 'ERR_NETWORK') errorMessage = 'Network error.';
+      }
+      setVisionState(prev => ({ ...prev, isAnalyzing: false, error: errorMessage }));
+      throw new Error(errorMessage);
+    }
+  }, []);
+
   const testVoice = useCallback(async (message: string) => {
     try {
       await axios.post(`${API_BASE_URL}/voice/test`, { message });
@@ -216,6 +282,7 @@ export const useVisionAnalysis = () => {
       lastAnalysis: null,
       error: null,
       analysisCount: 0,
+      lastPackagedFood: null,
     });
   }, []);
 
@@ -224,6 +291,7 @@ export const useVisionAnalysis = () => {
     analyzeImage,
     askQuestion,
     analyzeLiveFrame,
+    analyzePackagedFood,
     testVoice,
     getVoiceStatus,
     stopVoice,
