@@ -6,12 +6,14 @@ import { Play, Pause, Square, Settings, Clock } from 'lucide-react';
 interface AutoCaptureProps {
   onPhotoCapture: (blob: Blob) => void;
   isAnalyzing: boolean;
+  capturePhoto?: () => Promise<Blob | null>;
   className?: string;
 }
 
 export const AutoCapture: React.FC<AutoCaptureProps> = ({
   onPhotoCapture,
   isAnalyzing,
+  capturePhoto,
   className = '',
 }) => {
   const [isActive, setIsActive] = useState(false);
@@ -55,7 +57,16 @@ export const AutoCapture: React.FC<AutoCaptureProps> = ({
         }, 1000);
       } else {
         // Trigger photo capture
-        onPhotoCapture(new Blob());
+        console.log('Auto-capture triggered');
+        if (capturePhoto) {
+          capturePhoto().then((blob) => {
+            if (blob && onPhotoCapture) {
+              onPhotoCapture(blob);
+            }
+          }).catch((error) => {
+            console.error('Error capturing photo for auto-capture:', error);
+          });
+        }
         setCountdown(interval);
       }
     }

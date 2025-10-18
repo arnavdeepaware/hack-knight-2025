@@ -2,11 +2,14 @@
 
 import React, { useState, useCallback } from 'react';
 import { CameraView } from '../components/CameraView';
+import { AskQuestion } from '../components/AskQuestion';
 import { VoiceStatus } from '../components/VoiceStatus';
 import { AnalysisResults } from '../components/AnalysisResults';
 import { AutoCapture } from '../components/AutoCapture';
+import { LiveAnalysis } from '../components/LiveAnalysis';
 import { useVoice } from '../hooks/useVoice';
 import { useVisionAnalysis } from '../hooks/useVisionAnalysis';
+import { useCamera } from '../hooks/useCamera';
 import { Eye, Volume2, Settings, HelpCircle } from 'lucide-react';
 
 export default function HomePage() {
@@ -27,9 +30,13 @@ export default function HomePage() {
     analysisCount,
     error: analysisError,
     analyzeImage,
+    askQuestion,
+    analyzeLiveFrame,
     clearError,
     resetAnalysis,
   } = useVisionAnalysis();
+
+  const camera = useCamera();
 
   const handlePhotoCapture = useCallback(async (blob: Blob) => {
     try {
@@ -38,6 +45,14 @@ export default function HomePage() {
       console.error('Error analyzing photo:', error);
     }
   }, [analyzeImage]);
+
+  const handleLiveFrameCapture = useCallback(async (blob: Blob) => {
+    try {
+      await analyzeLiveFrame(blob);
+    } catch (error) {
+      console.error('Error analyzing live frame:', error);
+    }
+  }, [analyzeLiveFrame]);
 
   const handleTestVoice = useCallback(async () => {
     try {
@@ -107,6 +122,7 @@ export default function HomePage() {
               </div>
               <div className="p-4">
                 <CameraView
+                  camera={camera}
                   onPhotoCapture={handlePhotoCapture}
                   className="h-96"
                 />
@@ -117,11 +133,23 @@ export default function HomePage() {
             <AutoCapture
               onPhotoCapture={handlePhotoCapture}
               isAnalyzing={isAnalyzing}
+              capturePhoto={camera.capturePhotoAsBlob}
+            />
+
+            {/* Live Analysis */}
+            <LiveAnalysis
+              onFrameCapture={handleLiveFrameCapture}
+              isAnalyzing={isAnalyzing}
+              camera={camera}
             />
           </div>
 
           {/* Right Column - Voice and Analysis */}
           <div className="space-y-6">
+            <AskQuestion
+              camera={camera}
+              ask={askQuestion}
+            />
             {/* Voice Status */}
             <VoiceStatus
               isConnected={voiceConnected}
@@ -149,7 +177,7 @@ export default function HomePage() {
             <HelpCircle className="w-5 h-5 mr-2" />
             How to Use
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <h4 className="font-medium text-gray-800 mb-2">Getting Started</h4>
               <ul className="text-sm text-gray-600 space-y-1">
@@ -157,6 +185,15 @@ export default function HomePage() {
                 <li>• Allow camera permissions when prompted</li>
                 <li>• Position the camera to see your surroundings</li>
                 <li>• Click the camera button to capture a photo</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-gray-800 mb-2">Live Analysis</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Start "Live Analysis" for continuous video processing</li>
+                <li>• Adjust analysis interval (1-10 seconds)</li>
+                <li>• System automatically throttles to prevent overload</li>
+                <li>• Perfect for real-time navigation assistance</li>
               </ul>
             </div>
             <div>

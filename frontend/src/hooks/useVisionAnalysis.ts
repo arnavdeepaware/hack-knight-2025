@@ -26,6 +26,7 @@ export const useVisionAnalysis = () => {
 
   const analyzeImage = useCallback(async (imageBlob: Blob) => {
     try {
+      console.log('Starting image analysis, blob size:', imageBlob.size);
       setVisionState(prev => ({
         ...prev,
         isAnalyzing: true,
@@ -34,6 +35,7 @@ export const useVisionAnalysis = () => {
 
       const formData = new FormData();
       formData.append('image', imageBlob, 'camera-capture.jpg');
+      console.log('Sending request to backend:', `${API_BASE_URL}/analyze`);
 
       const response = await axios.post(`${API_BASE_URL}/analyze`, formData, {
         headers: {
@@ -43,6 +45,7 @@ export const useVisionAnalysis = () => {
       });
 
       const analysis: AnalysisResult = response.data.analysis;
+      console.log('Received analysis from backend:', analysis);
 
       setVisionState(prev => ({
         ...prev,
@@ -66,6 +69,99 @@ export const useVisionAnalysis = () => {
           errorMessage = 'Analysis timed out. Please try again.';
         } else if (error.code === 'ERR_NETWORK') {
           errorMessage = 'Network error. Please check your connection.';
+        }
+      }
+
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: false,
+        error: errorMessage,
+      }));
+
+      throw new Error(errorMessage);
+    }
+  }, []);
+
+  const askQuestion = useCallback(async (imageBlob: Blob, question: string) => {
+    try {
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'camera-capture.jpg');
+      formData.append('question', question);
+
+      const response = await axios.post(`${API_BASE_URL}/ask`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      const answer: string = response.data.answer;
+      return answer;
+    } catch (error) {
+      console.error('Error asking question:', error);
+      if (axios.isAxiosError(error) && error.response?.data?.error) {
+        throw new Error(error.response.data.error);
+      }
+      throw new Error('Failed to ask question');
+    }
+  }, []);
+
+  const analyzeLiveFrame = useCallback(async (imageBlob: Blob) => {
+    try {
+      console.log('Starting live frame analysis, blob size:', imageBlob.size);
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: true,
+        error: null,
+      }));
+
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'live-frame.jpg');
+      console.log('Sending live frame to backend:', `${API_BASE_URL}/live`);
+
+      const response = await axios.post(`${API_BASE_URL}/live`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 15000, // Shorter timeout for live analysis
+      });
+
+      const analysis: AnalysisResult = {
+        description: response.data.analysis.description,
+        navigation: '', // Live mode only provides description
+        objects: ''
+      };
+      console.log('Received live analysis from backend:', analysis);
+
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: false,
+        lastAnalysis: analysis,
+        analysisCount: prev.analysisCount + 1,
+        error: null,
+      }));
+
+      return analysis;
+    } catch (error) {
+      console.error('Error analyzing live frame:', error);
+      
+      let errorMessage = 'Failed to analyze live frame';
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 429) {
+          // Throttled - don't show error, just skip this frame
+          console.log('Live analysis throttled, skipping frame');
+          setVisionState(prev => ({
+            ...prev,
+            isAnalyzing: false,
+            error: null,
+          }));
+          return null;
+        } else if (error.response?.status === 413) {
+          errorMessage = 'Image too large for live analysis.';
+        } else if (error.response?.status === 400) {
+          errorMessage = 'Invalid image format for live analysis.';
+        } else if (error.code === 'ECONNABORTED') {
+          errorMessage = 'Live analysis timed out.';
+        } else if (error.code === 'ERR_NETWORK') {
+          errorMessage = 'Network error during live analysis.';
         }
       }
 
@@ -126,6 +222,8 @@ export const useVisionAnalysis = () => {
   return {
     ...visionState,
     analyzeImage,
+    askQuestion,
+    analyzeLiveFrame,
     testVoice,
     getVoiceStatus,
     stopVoice,

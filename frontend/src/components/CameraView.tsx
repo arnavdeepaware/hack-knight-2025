@@ -2,24 +2,37 @@
 
 import React from 'react';
 import { Camera, CameraOff, AlertCircle } from 'lucide-react';
-import { useCamera } from '../hooks/useCamera';
+
+interface CameraApi {
+  isActive: boolean;
+  isSupported: boolean;
+  error: string | null;
+  stream: MediaStream | null;
+  videoRef: React.RefObject<HTMLVideoElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  startCamera: () => Promise<void>;
+  stopCamera: () => void;
+  capturePhotoAsBlob: () => Promise<Blob | null>;
+}
 
 interface CameraViewProps {
+  camera: CameraApi;
   onPhotoCapture?: (blob: Blob) => void;
   className?: string;
 }
 
-export const CameraView: React.FC<CameraViewProps> = ({ onPhotoCapture, className = '' }) => {
+export const CameraView: React.FC<CameraViewProps> = ({ camera, onPhotoCapture, className = '' }) => {
   const {
     isActive,
     isSupported,
     error,
+    stream,
     videoRef,
     canvasRef,
     startCamera,
     stopCamera,
     capturePhotoAsBlob,
-  } = useCamera();
+  } = camera;
 
   const handleCapture = async () => {
     if (!isActive) return;
@@ -46,16 +59,40 @@ export const CameraView: React.FC<CameraViewProps> = ({ onPhotoCapture, classNam
   }
 
   return (
-    <div className={`relative bg-gray-900 rounded-lg overflow-hidden ${className}`}>
+    <div className={`relative bg-gray-900 rounded-lg overflow-hidden ${className}`} style={{ minHeight: '300px' }}>
       {/* Video Element */}
       <video
         ref={videoRef}
-        className={`w-full h-full object-cover transition-opacity duration-300 ${
-          isActive ? 'opacity-100' : 'opacity-0'
-        }`}
+        className="w-full h-full object-cover"
         playsInline
         muted
         autoPlay
+        width="100%"
+        height="100%"
+        style={{ 
+          minHeight: '300px',
+          opacity: isActive ? 1 : 0,
+          transition: 'opacity 0.3s ease-in-out',
+          display: isActive ? 'block' : 'none'
+        }}
+        onLoadedMetadata={() => {
+          console.log('Video loaded in CameraView, dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
+          if (videoRef.current) {
+            videoRef.current.style.opacity = '1';
+          }
+        }}
+        onCanPlay={() => {
+          console.log('Video can play in CameraView');
+          if (videoRef.current) {
+            videoRef.current.style.opacity = '1';
+          }
+        }}
+        onPlay={() => {
+          console.log('Video is playing');
+          if (videoRef.current) {
+            videoRef.current.style.opacity = '1';
+          }
+        }}
       />
       
       {/* Hidden Canvas for Photo Capture */}
@@ -120,6 +157,16 @@ export const CameraView: React.FC<CameraViewProps> = ({ onPhotoCapture, classNam
           <div className="flex items-center space-x-2 bg-black bg-opacity-50 text-white px-3 py-1 rounded-full text-sm">
             <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
             <span>Live</span>
+          </div>
+        </div>
+      )}
+
+      {/* Debug Info */}
+      {isActive && (
+        <div className="absolute top-4 left-4">
+          <div className="bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+            <div>Stream: {stream ? 'Active' : 'None'}</div>
+            <div>Video: {videoRef.current?.readyState || 'Unknown'}</div>
           </div>
         </div>
       )}

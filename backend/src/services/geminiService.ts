@@ -100,6 +100,30 @@ For each object, mention its approximate location (left, right, center, near, fa
       throw new Error('Failed to identify objects');
     }
   }
+
+  async answerQuestion(imageBuffer: Buffer, question: string): Promise<string> {
+    try {
+      const imageData = {
+        inlineData: {
+          data: imageBuffer.toString('base64'),
+          mimeType: 'image/jpeg'
+        }
+      };
+
+      const systemPrompt = `You are a concise visual assistant. Answer the user's question using ONLY the information visible in the image. If the answer cannot be determined from the image, say "I can't tell from the image."
+
+Keep answers under 60 words. Prefer direct, helpful responses.`;
+
+      const userPrompt = `Question: ${question}`;
+
+      const result = await this.model.generateContent([systemPrompt, userPrompt, imageData]);
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Error answering question with Gemini:', error);
+      throw new Error('Failed to answer question');
+    }
+  }
 }
 
 export default new GeminiService();

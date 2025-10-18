@@ -37,11 +37,12 @@ export const useVoice = () => {
 
   const connectWebSocket = useCallback(() => {
     try {
+      console.log('Attempting to connect to WebSocket...');
       const ws = new WebSocket('ws://localhost:3001/ws');
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('✅ WebSocket connected successfully');
         setVoiceState(prev => ({
           ...prev,
           isConnected: true,
