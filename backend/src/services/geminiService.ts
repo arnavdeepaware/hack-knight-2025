@@ -67,16 +67,17 @@ export class GeminiService {
         }
       };
 
-      const prompt = `You are a helpful assistant for blind people. Analyze this image and provide a clear, concise description that would help a blind person understand what they're seeing. Focus on:
+      const prompt = `You are a grocery shopping assistant for blind people. Analyze this image and provide a focused description of the food shopping environment. Focus on:
 
-1. Main objects and people in the scene
-2. Spatial relationships (left, right, center, distance)
-3. Colors and visual characteristics
-4. Text if visible (read signs, labels, etc.)
-5. Potential obstacles or hazards
-6. Navigation cues (doors, paths, stairs)
+1. Food items and products visible (fruits, vegetables, packaged goods, etc.)
+2. Store layout and organization (aisles, sections, displays)
+3. Product labels and signs that are readable
+4. Shopping cart or basket contents if visible
+5. Store staff or other shoppers if relevant
+6. Price tags or promotional signs
+7. Food safety information (expiration dates, storage instructions)
 
-Keep the description under 100 words and use simple, clear language. Be specific about locations and distances when possible.`;
+Keep the description under 80 words and focus specifically on food shopping context. Be ready to answer questions about what you see.`;
 
       const result = await this.model.generateContent([prompt, imageData]);
       const response = await result.response;
@@ -96,17 +97,17 @@ Keep the description under 100 words and use simple, clear language. Be specific
         }
       };
 
-      const prompt = `You are a navigation assistant for blind people. Analyze this image and provide specific navigation guidance. Focus on:
+      const prompt = `You are a grocery store navigation assistant for blind people. Analyze this image and provide specific shopping navigation guidance. Focus on:
 
-1. Clear paths and walkways
-2. Obstacles to avoid (steps, curbs, objects)
-3. Doors, entrances, and exits
-4. Stairs or elevators
-5. Handrails or guide features
-6. Crowded areas or open spaces
-7. Directional cues (signs, arrows)
+1. Store aisles and their organization
+2. Shopping cart or basket locations
+3. Product sections (produce, dairy, meat, etc.)
+4. Checkout lanes and registers
+5. Store staff or customer service areas
+6. Shopping cart obstacles or clear paths
+7. Product display heights and accessibility
 
-Provide actionable guidance like "Walk straight for 10 steps, then turn left at the door" or "There's a step down ahead, be careful". Keep it under 80 words.`;
+Provide actionable guidance like "The produce section is to your right, about 15 steps away" or "There's a shopping cart blocking the aisle ahead". Keep it under 60 words and focus on grocery shopping context.`;
 
       const result = await this.model.generateContent([prompt, imageData]);
       const response = await result.response;
@@ -126,16 +127,17 @@ Provide actionable guidance like "Walk straight for 10 steps, then turn left at 
         }
       };
 
-      const prompt = `Identify and describe objects in this image that a blind person should know about. List them in order of importance:
+      const prompt = `Identify and describe food-related objects in this grocery store image. List them in order of shopping importance:
 
-1. People (how many, approximate age, what they're doing)
-2. Furniture and fixtures
-3. Electronic devices
-4. Food or drinks
-5. Personal items
-6. Safety-related objects
+1. Fresh produce (fruits, vegetables) - type, condition, location
+2. Packaged foods (cereals, snacks, canned goods) - brand, product name
+3. Dairy products (milk, cheese, yogurt) - type, brand, expiration dates if visible
+4. Meat and seafood - type, packaging, freshness indicators
+5. Shopping cart or basket contents
+6. Store displays and promotional items
+7. Price tags and labels
 
-For each object, mention its approximate location (left, right, center, near, far) and any relevant details. Keep the response under 120 words.`;
+For each food item, mention its approximate location (left, right, center, near, far) and any relevant shopping details like price, brand, or condition. Keep the response under 100 words.`;
 
       const result = await this.model.generateContent([prompt, imageData]);
       const response = await result.response;
@@ -155,9 +157,15 @@ For each object, mention its approximate location (left, right, center, near, fa
         }
       };
 
-      const systemPrompt = `You are a concise visual assistant. Answer the user's question using ONLY the information visible in the image. If the answer cannot be determined from the image, say "I can't tell from the image."
+      const systemPrompt = `You are a grocery shopping assistant for blind people. Answer the user's question about the food shopping environment using ONLY the information visible in the image. Focus on:
 
-Keep answers under 60 words. Prefer direct, helpful responses.`;
+- Food items, brands, prices, and product details
+- Store layout, aisles, and sections
+- Product freshness, expiration dates, and quality
+- Shopping cart contents and organization
+- Store staff or other shoppers if relevant
+
+If the answer cannot be determined from the image, say "I can't tell from the image." Keep answers under 80 words and be specific about food shopping context.`;
 
       const userPrompt = `Question: ${question}`;
 
@@ -287,6 +295,66 @@ ${schemaHint}`,
         nutritionFacts: null,
         notes: 'cannot see clearly',
       };
+    }
+  }
+
+  async analyzeProduce(imageBuffer: Buffer): Promise<string> {
+    try {
+      const imageData = {
+        inlineData: {
+          data: imageBuffer.toString('base64'),
+          mimeType: 'image/jpeg'
+        }
+      };
+
+      const prompt = `You are analyzing fresh produce for a blind person shopping. Focus on:
+
+1. Type of fruits or vegetables visible
+2. Freshness indicators (color, firmness, blemishes)
+3. Size and ripeness level
+4. Price per pound or unit if visible
+5. Organic vs conventional labels
+6. Storage recommendations if mentioned
+7. Any special offers or sales
+
+Provide a helpful description for grocery shopping. Keep it under 80 words.`;
+
+      const result = await this.model.generateContent([prompt, imageData]);
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Error analyzing produce with Gemini:', error);
+      throw new Error('Failed to analyze produce');
+    }
+  }
+
+  async analyzeStoreSection(imageBuffer: Buffer): Promise<string> {
+    try {
+      const imageData = {
+        inlineData: {
+          data: imageBuffer.toString('base64'),
+          mimeType: 'image/jpeg'
+        }
+      };
+
+      const prompt = `You are helping a blind person navigate a grocery store section. Analyze and describe:
+
+1. What store section this is (produce, dairy, meat, bakery, etc.)
+2. Aisle organization and layout
+3. Product categories and their locations
+4. Price signs and promotional displays
+5. Store staff or other shoppers if visible
+6. Shopping cart accessibility
+7. Checkout lanes or registers nearby
+
+Provide navigation guidance for grocery shopping. Keep it under 100 words.`;
+
+      const result = await this.model.generateContent([prompt, imageData]);
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Error analyzing store section with Gemini:', error);
+      throw new Error('Failed to analyze store section');
     }
   }
 }

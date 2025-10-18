@@ -29,10 +29,8 @@ export class VisionController {
         geminiService.identifyObjects(processedImage)
       ]);
 
-      // Send voice guidance
-      await voiceService.speak(description, 'description', 'high');
-      await voiceService.speak(navigation, 'navigation', 'medium');
-      await voiceService.speak(objects, 'objects', 'low');
+      // Don't automatically speak - wait for user questions
+      // Voice will only be used when user asks specific questions
 
       res.json({
         success: true,
@@ -143,8 +141,8 @@ export class VisionController {
       // Get only essential analysis for live mode
       const description = await geminiService.analyzeImage(processedImage);
 
-      // Send voice guidance with lower priority for live mode
-      await voiceService.speak(description, 'description', 'low');
+      // Don't automatically speak in live mode - wait for user questions
+      // This prevents continuous speaking while shopping
 
       res.json({
         success: true,
@@ -167,15 +165,94 @@ export class VisionController {
         return res.status(400).json({ error: 'Image is required' });
       }
       const result = await geminiService.analyzePackagedFood(file.buffer);
+      
+      // Create a summary for voice output
+      let voiceSummary = '';
+      if (result.status === 'ok' && result.product) {
+        const product = result.product;
+        voiceSummary = `I can see ${product.brand || 'a product'} ${product.item || 'item'}`;
+        if (product.quantity) voiceSummary += `, size ${product.quantity}`;
+        if (result.nutritionFacts?.calories) {
+          voiceSummary += `. It has ${result.nutritionFacts.calories} calories per serving`;
+        }
+        if (product.ingredients && product.ingredients.length > 0) {
+          voiceSummary += `. Main ingredients include ${product.ingredients.slice(0, 3).join(', ')}`;
+        }
+      } else {
+        voiceSummary = 'I cannot clearly read the product label. Please try positioning the camera closer to the text.';
+      }
+      
+      // Speak the product information
+      await voiceService.speak(voiceSummary, 'description', 'high');
+      
       return res.json(result);
     } catch (e) {
       console.error('Error in analyzePackagedFood:', e);
+      await voiceService.speak('Sorry, I could not read the product label. Please try again.', 'error', 'high');
       return res.status(500).json({
         status: 'not_visible',
         product: { brand: null, item: null, quantity: null, ingredients: null },
         nutritionFacts: null,
         notes: 'cannot see clearly',
       });
+    }
+  }
+
+  async analyzeProduce(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image provided' });
+      }
+
+      // Process image with sharp
+      const processedImage = await sharp(req.file.buffer)
+        .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      // Get produce analysis from Gemini
+      const analysis = await geminiService.analyzeProduce(processedImage);
+
+      // Speak the analysis
+      await voiceService.speak(analysis, 'description', 'high');
+
+      res.json({
+        success: true,
+        analysis
+      });
+    } catch (error) {
+      console.error('Error in analyzeProduce:', error);
+      await voiceService.speak('Sorry, I could not analyze the produce. Please try again.', 'error', 'high');
+      res.status(500).json({ error: 'Failed to analyze produce' });
+    }
+  }
+
+  async analyzeStoreSection(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image provided' });
+      }
+
+      // Process image with sharp
+      const processedImage = await sharp(req.file.buffer)
+        .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      // Get store section analysis from Gemini
+      const analysis = await geminiService.analyzeStoreSection(processedImage);
+
+      // Speak the analysis
+      await voiceService.speak(analysis, 'description', 'high');
+
+      res.json({
+        success: true,
+        analysis
+      });
+    } catch (error) {
+      console.error('Error in analyzeStoreSection:', error);
+      await voiceService.speak('Sorry, I could not analyze the store section. Please try again.', 'error', 'high');
+      res.status(500).json({ error: 'Failed to analyze store section' });
     }
   }
 }

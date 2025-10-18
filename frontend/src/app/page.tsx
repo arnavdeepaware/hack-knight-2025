@@ -5,8 +5,6 @@ import { CameraView } from '../components/CameraView';
 import { AskQuestion } from '../components/AskQuestion';
 import { VoiceStatus } from '../components/VoiceStatus';
 import { AnalysisResults } from '../components/AnalysisResults';
-import { AutoCapture } from '../components/AutoCapture';
-import { LiveAnalysis } from '../components/LiveAnalysis';
 import { useVoice } from '../hooks/useVoice';
 import { useVisionAnalysis } from '../hooks/useVisionAnalysis';
 import { useCamera } from '../hooks/useCamera';
@@ -14,8 +12,6 @@ import { Eye, Volume2, Settings, HelpCircle } from 'lucide-react';
 import PackagedFoodResults from '../components/PackagedFoodResults';
 
 export default function HomePage() {
-  const [isAutoCaptureEnabled, setIsAutoCaptureEnabled] = useState(false);
-  
   const {
     isConnected: voiceConnected,
     isSpeaking,
@@ -32,8 +28,9 @@ export default function HomePage() {
     error: analysisError,
     analyzeImage,
     askQuestion,
-    analyzeLiveFrame,
     analyzePackagedFood,
+    analyzeProduce,
+    analyzeStoreSection,
     lastPackagedFood,
     clearError,
     resetAnalysis,
@@ -49,13 +46,6 @@ export default function HomePage() {
     }
   }, [analyzeImage]);
 
-  const handleLiveFrameCapture = useCallback(async (blob: Blob) => {
-    try {
-      await analyzeLiveFrame(blob);
-    } catch (error) {
-      console.error('Error analyzing live frame:', error);
-    }
-  }, [analyzeLiveFrame]);
 
   const handleTestVoice = useCallback(async () => {
     try {
@@ -79,6 +69,26 @@ export default function HomePage() {
     }
   }, [camera.capturePhotoAsBlob, analyzePackagedFood]);
 
+  const handleAnalyzeProduce = useCallback(async () => {
+    try {
+      const blob = await camera.capturePhotoAsBlob();
+      if (!blob) return;
+      await analyzeProduce(blob);
+    } catch (e) {
+      console.error('Error analyzing produce:', e);
+    }
+  }, [camera.capturePhotoAsBlob, analyzeProduce]);
+
+  const handleAnalyzeStoreSection = useCallback(async () => {
+    try {
+      const blob = await camera.capturePhotoAsBlob();
+      if (!blob) return;
+      await analyzeStoreSection(blob);
+    } catch (e) {
+      console.error('Error analyzing store section:', e);
+    }
+  }, [camera.capturePhotoAsBlob, analyzeStoreSection]);
+
   const handleClearError = useCallback(() => {
     clearError();
   }, [clearError]);
@@ -98,8 +108,8 @@ export default function HomePage() {
                 <Eye className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Blind Assistance</h1>
-                <p className="text-sm text-gray-600">AI-Powered Voice Guidance</p>
+                <h1 className="text-xl font-bold text-gray-900">Grocery Shopping Assistant</h1>
+                <p className="text-sm text-gray-600">AI-Powered Food Shopping Support</p>
               </div>
             </div>
             
@@ -139,30 +149,29 @@ export default function HomePage() {
                   onPhotoCapture={handlePhotoCapture}
                   className="h-96"
                 />
-                <div className="mt-4 flex gap-3">
+                <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     onClick={handleAnalyzePackagedFood}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                   >
                     Analyze Packaged Food
                   </button>
+                  <button
+                    onClick={handleAnalyzeProduce}
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                  >
+                    Analyze Fresh Produce
+                  </button>
+                  <button
+                    onClick={handleAnalyzeStoreSection}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Analyze Store Section
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Auto Capture */}
-            <AutoCapture
-              onPhotoCapture={handlePhotoCapture}
-              isAnalyzing={isAnalyzing}
-              capturePhoto={camera.capturePhotoAsBlob}
-            />
-
-            {/* Live Analysis */}
-            <LiveAnalysis
-              onFrameCapture={handleLiveFrameCapture}
-              isAnalyzing={isAnalyzing}
-              camera={camera}
-            />
           </div>
 
           {/* Right Column - Voice and Analysis */}
@@ -207,26 +216,28 @@ export default function HomePage() {
               <ul className="text-sm text-gray-600 space-y-1">
                 <li>• Click "Start Camera" to begin</li>
                 <li>• Allow camera permissions when prompted</li>
-                <li>• Position the camera to see your surroundings</li>
+                <li>• Point camera at food items or store sections</li>
                 <li>• Click the camera button to capture a photo</li>
               </ul>
             </div>
             <div>
-              <h4 className="font-medium text-gray-800 mb-2">Live Analysis</h4>
+              <h4 className="font-medium text-gray-800 mb-2">Ask About Food</h4>
               <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Start "Live Analysis" for continuous video processing</li>
-                <li>• Adjust analysis interval (1-10 seconds)</li>
-                <li>• System automatically throttles to prevent overload</li>
-                <li>• Perfect for real-time navigation assistance</li>
+                <li>• Click "Voice" button and speak your question</li>
+                <li>• Questions are asked automatically when you finish speaking</li>
+                <li>• Ask "What fruits do you see?"</li>
+                <li>• Ask "What's the price of this item?"</li>
+                <li>• Ask "What are the ingredients?"</li>
+                <li>• Ask "Is this fresh?" or "What's the expiration date?"</li>
               </ul>
             </div>
             <div>
-              <h4 className="font-medium text-gray-800 mb-2">Voice Guidance</h4>
+              <h4 className="font-medium text-gray-800 mb-2">Product Analysis</h4>
               <ul className="text-sm text-gray-600 space-y-1">
-                <li>• All analysis results are spoken automatically</li>
-                <li>• Use "Test Voice" to verify audio is working</li>
-                <li>• Enable Auto Capture for continuous monitoring</li>
-                <li>• Use "Stop Speaking" to pause voice output</li>
+                <li>• Use "Analyze Packaged Food" for nutrition labels</li>
+                <li>• Get brand, ingredients, and nutrition facts</li>
+                <li>• Voice responses provided automatically</li>
+                <li>• Perfect for reading small product labels</li>
               </ul>
             </div>
           </div>

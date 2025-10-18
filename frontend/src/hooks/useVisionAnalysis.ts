@@ -269,6 +269,78 @@ export const useVisionAnalysis = () => {
     }
   }, []);
 
+  // Analyze Produce
+  const analyzeProduce = useCallback(async (imageBlob: Blob) => {
+    try {
+      setVisionState(prev => ({ ...prev, isAnalyzing: true, error: null }));
+
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'produce.jpg');
+
+      const response = await axios.post(`${API_BASE_URL}/produce`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      const analysis = response.data.analysis;
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: false,
+        lastAnalysis: { description: analysis, navigation: '', objects: '' },
+        error: null,
+      }));
+
+      return analysis;
+    } catch (error) {
+      console.error('Error analyzing produce:', error);
+      let errorMessage = 'Could not analyze produce';
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 413) errorMessage = 'Image too large.';
+        else if (error.response?.status === 400) errorMessage = 'Invalid image.';
+        else if (error.code === 'ECONNABORTED') errorMessage = 'Request timed out.';
+        else if (error.code === 'ERR_NETWORK') errorMessage = 'Network error.';
+      }
+      setVisionState(prev => ({ ...prev, isAnalyzing: false, error: errorMessage }));
+      throw new Error(errorMessage);
+    }
+  }, []);
+
+  // Analyze Store Section
+  const analyzeStoreSection = useCallback(async (imageBlob: Blob) => {
+    try {
+      setVisionState(prev => ({ ...prev, isAnalyzing: true, error: null }));
+
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'store-section.jpg');
+
+      const response = await axios.post(`${API_BASE_URL}/store-section`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      const analysis = response.data.analysis;
+      setVisionState(prev => ({
+        ...prev,
+        isAnalyzing: false,
+        lastAnalysis: { description: analysis, navigation: '', objects: '' },
+        error: null,
+      }));
+
+      return analysis;
+    } catch (error) {
+      console.error('Error analyzing store section:', error);
+      let errorMessage = 'Could not analyze store section';
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 413) errorMessage = 'Image too large.';
+        else if (error.response?.status === 400) errorMessage = 'Invalid image.';
+        else if (error.code === 'ECONNABORTED') errorMessage = 'Request timed out.';
+        else if (error.code === 'ERR_NETWORK') errorMessage = 'Network error.';
+      }
+      setVisionState(prev => ({ ...prev, isAnalyzing: false, error: errorMessage }));
+      throw new Error(errorMessage);
+    }
+  }, []);
+
   const clearError = useCallback(() => {
     setVisionState(prev => ({
       ...prev,
@@ -292,6 +364,8 @@ export const useVisionAnalysis = () => {
     askQuestion,
     analyzeLiveFrame,
     analyzePackagedFood,
+    analyzeProduce,
+    analyzeStoreSection,
     testVoice,
     getVoiceStatus,
     stopVoice,
