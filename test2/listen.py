@@ -2,6 +2,7 @@
 listen.py - Speech-to-Text using SpeechRecognition
 
 Handles:
+- Continuous listening for wake word ("VisionR")
 - Recording audio from microphone with dynamic silence detection
 - Converting speech to text
 """
@@ -14,6 +15,9 @@ import sounddevice as sd
 import soundfile as sf
 import speech_recognition as sr
 from typing import Optional
+from collections import deque
+import threading
+import queue
 
 
 # Recording settings
@@ -23,8 +27,13 @@ CHANNELS = 1
 # Voice Activity Detection settings
 SILENCE_THRESHOLD = 0.01  # Adjust based on your microphone sensitivity
 SILENCE_DURATION = 3.0  # Stop after 3 seconds of silence
-CHUNK_DURATION = 0.1  # Process audio in 100ms chunks
+CHUNK_DURATION = 0.5  # Process audio in 500ms chunks for better recognition
 MIN_RECORDING_DURATION = 0.5  # Minimum recording time in seconds
+
+# Wake word settings
+WAKE_WORD = "vision"  # Listen for "vision" (will catch "visionr", "vision are", etc.)
+WAKE_WORD_BUFFER_DURATION = 2.0  # Keep last 2 seconds of audio
+WAKE_WORD_CHECK_INTERVAL = 0.5  # Check for wake word every 0.5 seconds
 
 
 def calculate_rms(audio_chunk: np.ndarray) -> float:
@@ -225,18 +234,165 @@ def speech_to_text(wav_path: str) -> Optional[str]:
         return None
 
 
-def listen(duration: float = None, dynamic: bool = True) -> Optional[str]:
+def detect_wake_word_in_audio(audio_data: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bool:
+    """
+    Detect if the wake word is present in the audio data.
+    Uses speech recognition to transcribe and check for wake word.
+    
+    Args:
+        audio_data: Audio data as numpy array
+        sample_rate: Audio sample rate
+        
+    Returns:
+        True if wake word detected, False otherwise
+    """
+    try:
+        # Convert to int16
+        audio_int16 = np.int16(np.clip(audio_data, -1.0, 1.0) * 32767)
+        
+        # Save to temporary file
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        wav_path = tmp.name
+        tmp.close()
+        
+        sf.write(wav_path, audio_int16, sample_rate, subtype="PCM_16")
+        
+        # Try to recognize
+        recognizer = sr.Recognizer()
+        recognizer.energy_threshold = 300  # Lower threshold for better detection
+        recognizer.dynamic_energy_threshold = True
+        
+        with sr.AudioFile(wav_path) as source:
+            audio = recognizer.record(source)
+        
+        try:
+            # Use Google's speech recognition
+            text = recognizer.recognize_google(audio).lower()
+            print(f"🔍 Detected: '{text}'")
+            
+            # Clean up
+            try:
+                os.remove(wav_path)
+            except:
+                pass
+            
+            # Check if wake word is in the text
+            # Look for "vision" which will match "visionr", "vision are", etc.
+            if WAKE_WORD in text or "vision r" in text or "visionr" in text or "vision are" in text:
+                return True
+                
+        except sr.UnknownValueError:
+            # Could not understand - not the wake word
+            pass
+        except sr.RequestError as e:
+            print(f"⚠️ Recognition service error: {e}")
+        
+        # Clean up
+        try:
+            os.remove(wav_path)
+        except:
+            pass
+            
+        return False
+        
+    except Exception as e:
+        print(f"⚠️ Error in wake word detection: {e}")
+        return False
+
+
+def listen_for_wake_word(timeout: float = None) -> bool:
+    """
+    Continuously listen for the wake word "VisionR".
+    Returns True when wake word is detected.
+    
+    Args:
+        timeout: Maximum time to listen (None for infinite)
+        
+    Returns:
+        True if wake word detected, False if timeout or error
+    """
+    print("\n👂 Listening for wake word 'VisionR'...")
+    print("💡 Speak clearly: 'VisionR' or 'Vision R' to activate")
+    
+    chunk_size = int(WAKE_WORD_CHECK_INTERVAL * SAMPLE_RATE)
+    buffer_size = int(WAKE_WORD_BUFFER_DURATION / WAKE_WORD_CHECK_INTERVAL)
+    audio_buffer = deque(maxlen=buffer_size)
+    
+    start_time = time.time()
+    last_check_time = start_time
+    
+    try:
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype='float32',
+            blocksize=chunk_size
+        ) as stream:
+            
+            print("🎤 Microphone active - say 'VisionR' to start...")
+            
+            while True:
+                # Check timeout
+                if timeout and (time.time() - start_time) > timeout:
+                    print("\n⏱️ Wake word listening timeout")
+                    return False
+                
+                # Read audio chunk
+                audio_chunk, overflowed = stream.read(chunk_size)
+                
+                if overflowed:
+                    print("⚠️ Audio buffer overflow")
+                
+                # Add to buffer
+                audio_buffer.append(audio_chunk.copy())
+                
+                # Calculate volume to see if there's sound
+                rms = calculate_rms(audio_chunk)
+                
+                # Only check for wake word if there's sound above threshold
+                # and enough time has passed since last check
+                current_time = time.time()
+                if rms > SILENCE_THRESHOLD and (current_time - last_check_time) >= WAKE_WORD_CHECK_INTERVAL:
+                    last_check_time = current_time
+                    
+                    # Show that we're listening to sound
+                    print("🔊 Sound detected, checking...", end="\r")
+                    
+                    # Get buffered audio (last 2 seconds)
+                    if len(audio_buffer) > 0:
+                        buffered_audio = np.concatenate(list(audio_buffer), axis=0)
+                        
+                        # Check for wake word
+                        if detect_wake_word_in_audio(buffered_audio):
+                            print("\n✅ Wake word 'VisionR' detected! Starting recording...")
+                            return True
+    
+    except KeyboardInterrupt:
+        print("\n⚠️ Wake word listening interrupted by user")
+        return False
+    except Exception as e:
+        print(f"\n⚠️ Error in wake word listening: {e}")
+        return False
+
+
+def listen(duration: float = None, dynamic: bool = True, use_wake_word: bool = False) -> Optional[str]:
     """
     Complete listening flow: record audio and convert to text.
     
     Args:
         duration: Recording duration in seconds (only used if dynamic=False)
         dynamic: If True, use dynamic silence detection; if False, use fixed duration
+        use_wake_word: If True, wait for wake word before recording
         
     Returns:
         Transcribed text or None if failed
     """
     try:
+        # Wait for wake word if enabled
+        if use_wake_word:
+            if not listen_for_wake_word():
+                return None
+        
         # Record audio
         if dynamic:
             wav_path = record_audio_dynamic()
@@ -263,10 +419,10 @@ def listen(duration: float = None, dynamic: bool = True) -> Optional[str]:
 
 
 if __name__ == "__main__":
-    # Test the listening functionality
-    print("Testing listen.py with dynamic silence detection...")
-    print("Start speaking, and I'll stop listening after 3 seconds of silence.")
-    result = listen(dynamic=True)
+    # Test the listening functionality with wake word
+    print("Testing listen.py with wake word detection...")
+    print("Say 'VisionR' to start recording, then speak your message.")
+    result = listen(dynamic=True, use_wake_word=True)
     if result:
         print(f"✅ Successfully transcribed: {result}")
     else:

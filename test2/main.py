@@ -220,27 +220,29 @@ def load_food_context(file_path: str = "food.json") -> Optional[Dict]:
 def main():
     """Main conversation loop."""
     print("\n" + "="*60)
-    print("🎙️  AI Food Nutrition Assistant")
+    print("🎙️  VisionR - AI Food Nutrition Assistant")
     print("="*60)
     print("\nThis assistant will:")
     print("  1. Tell you about the food item")
-    print("  2. Listen to your questions")
-    print("  3. Provide nutrition information")
-    print("  4. Warn about allergens if you mention allergies")
-    print("\nCommands:")
-    print("  - Press Enter to start recording (stops after 3s of silence)")
-    print("  - Type 'exit' or 'quit' to end the conversation")
-    print("  - Type 'reset' to start a fresh conversation")
-    print("  - Type any text to send it directly (without recording)")
-    print("\nTry saying (food-related):")
-    print("  - 'Tell me more about this product'")
-    print("  - 'What are the calories?'")
-    print("  - 'I have a peanut allergy'")
-    print("  - 'Is this healthy?'")
-    print("\nOr ask anything else:")
-    print("  - 'Tell me a joke'")
-    print("  - 'What's the weather like?'")
-    print("  - 'Explain quantum physics simply'")
+    print("  2. Continuously listen for wake word 'VisionR'")
+    print("  3. Record and answer your questions")
+    print("  4. Provide nutrition information and general assistance")
+    print("\nHow to use:")
+    print("  🗣️  Say 'VisionR' (or 'Vision R') to activate")
+    print("  💬 Then speak your question")
+    print("  ⏸️  Wait 3 seconds after speaking")
+    print("  🔊 Listen to the response")
+    print("  🔁 Say 'VisionR' again for next question")
+    print("  🛑 Say 'quit', 'exit', or 'stop' to end")
+    print("\nAlternative:")
+    print("  - Type 'manual' to switch to press-Enter mode")
+    print("  - Type 'exit' or 'quit' to end")
+    print("  - Type any text to send without voice")
+    print("\nTry saying:")
+    print("  - 'VisionR, tell me about this product'")
+    print("  - 'VisionR, what are the calories?'")
+    print("  - 'VisionR, I have allergies'")
+    print("  - 'VisionR, tell me a joke'")
     print("="*60 + "\n")
     
     # Load food context
@@ -261,39 +263,88 @@ def main():
     if initial_intro:
         speak(initial_intro)
     
+    # Wake word mode by default
+    use_wake_word_mode = True
+    
+    print("\n" + "="*60)
+    print("🎙️ Ready! Say 'VisionR' to start a conversation")
+    print("="*60)
+    
     # Main conversation loop
     while True:
         try:
-            # Get user input
-            user_input = input("\n➡️  Press Enter to record, or type a message: ").strip()
-            
-            # Check for exit commands
-            if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
-                farewell = "Goodbye! It was great talking with you. Have a wonderful day!"
-                speak(farewell)
-                print("\n👋 Exiting conversation...")
-                break
-            
-            # Check for reset command
-            if user_input.lower() == 'reset':
-                conversation.reset()
-                reset_msg = "Okay, let's start fresh! What would you like to talk about?"
-                speak(reset_msg)
-                continue
-            
-            # Get user's message (either typed or spoken)
-            if user_input:
-                # User typed a message
-                user_message = user_input
-                print(f"💬 You: {user_message}")
-            else:
-                # Record audio and transcribe with dynamic silence detection
-                print("\n🎤 Start speaking now... (I'll stop listening after 3 seconds of silence)")
-                user_message = listen(dynamic=True)
+            # Handle wake word mode
+            if use_wake_word_mode:
+                # Listen for wake word, but allow text input
+                print("\n💬 Say 'VisionR' to speak, or type a command:")
+                print("   (Type 'manual' for press-Enter mode, 'exit' to quit)")
+                
+                # Start wake word listening (non-blocking approach)
+                user_message = listen(dynamic=True, use_wake_word=True)
                 
                 if not user_message:
-                    error_msg = "Sorry, I didn't catch that. Could you try again?"
-                    speak(error_msg)
+                    # Wake word detection was cancelled or failed
+                    continue
+                
+                print(f"💬 You said: {user_message}")
+                
+            else:
+                # Manual mode - wait for user input
+                user_input = input("\n➡️  Press Enter to record, or type a message: ").strip()
+                
+                # Check for exit commands
+                if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
+                    farewell = "Goodbye! It was great talking with you. Have a wonderful day!"
+                    speak(farewell)
+                    print("\n👋 Exiting conversation...")
+                    break
+                
+                # Check for mode switch
+                if user_input.lower() == 'wake':
+                    use_wake_word_mode = True
+                    print("✅ Switched to wake word mode. Say 'VisionR' to activate.")
+                    continue
+                
+                # Check for reset command
+                if user_input.lower() == 'reset':
+                    conversation.reset()
+                    reset_msg = "Okay, let's start fresh! What would you like to talk about?"
+                    speak(reset_msg)
+                    continue
+                
+                # Get user's message (either typed or spoken)
+                if user_input:
+                    # User typed a message
+                    user_message = user_input
+                    print(f"💬 You: {user_message}")
+                else:
+                    # Record audio and transcribe with dynamic silence detection
+                    print("\n🎤 Start speaking now... (I'll stop listening after 3 seconds of silence)")
+                    user_message = listen(dynamic=True, use_wake_word=False)
+                    
+                    if not user_message:
+                        error_msg = "Sorry, I didn't catch that. Could you try again?"
+                        speak(error_msg)
+                        continue
+            
+            # Check for typed commands (in wake word mode)
+            if use_wake_word_mode and user_message:
+                # Check for exit commands in voice input
+                if any(word in user_message.lower() for word in ['exit', 'quit', 'bye', 'goodbye', 'stop']):
+                    farewell = "Goodbye! It was great talking with you. Have a wonderful day!"
+                    speak(farewell)
+                    print("\n👋 Exiting conversation...")
+                    break
+                
+                if user_message.lower() == 'manual':
+                    use_wake_word_mode = False
+                    print("✅ Switched to manual mode. Press Enter to record.")
+                    continue
+                
+                if user_message.lower() == 'reset':
+                    conversation.reset()
+                    reset_msg = "Okay, let's start fresh! What would you like to talk about?"
+                    speak(reset_msg)
                     continue
             
             # Get AI response
@@ -309,6 +360,10 @@ def main():
             
             # Small pause for natural conversation flow
             print("\n" + "-"*60)
+            
+            # In wake word mode, remind user
+            if use_wake_word_mode:
+                print("🔄 Ready for next question. Say 'VisionR' to continue...")
             
         except KeyboardInterrupt:
             print("\n\n⚠️ Interrupted by user")
