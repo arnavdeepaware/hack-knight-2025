@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Camera Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    select, button { padding: 10px; margin: 10px; font-size: 16px; }
+    video { border: 2px solid blue; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🎥 Camera Detection Test</h1>
+  
+  <button id="listCameras">1. List All Cameras</button>
+  <div id="cameraList" style="margin: 20px 0; padding: 10px; background: #f0f0f0;"></div>
+  
+  <select id="cameraSelect" style="display:none; width: 500px;"></select>
+  <button id="useCamera" style="display:none;">2. Use Selected Camera</button>
+  
+  <br>
+  <video id="video" width="640" height="480" autoplay></video>
+  
+  <script>
+    const listBtn = document.getElementById('listCameras');
+    const cameraList = document.getElementById('cameraList');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const useBtn = document.getElementById('useCamera');
+    const video = document.getElementById('video');
+    
+    listBtn.onclick = async () => {
+      try {
+        // Request permission first
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        tempStream.getTracks().forEach(t => t.stop());
+        
+        // Now list devices
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(d => d.kind === 'videoinput');
+        
+        cameraList.innerHTML = '<h3>Found ' + cameras.length + ' camera(s):</h3>';
+        cameraSelect.innerHTML = '';
+        
+        cameras.forEach((cam, i) => {
+          cameraList.innerHTML += `<div>${i+1}. ${cam.label}</div>`;
+          
+          const option = document.createElement('option');
+          option.value = cam.deviceId;
+          option.text = cam.label || `Camera ${i+1}`;
+          cameraSelect.appendChild(option);
+        });
+        
+        cameraSelect.style.display = 'block';
+        useBtn.style.display = 'inline-block';
+        
+      } catch (err) {
+        cameraList.innerHTML = '<div style="color:red;">Error: ' + err.message + '</div>';
+      }
+    };
+    
+    useBtn.onclick = async () => {
+      try {
+        const deviceId = cameraSelect.value;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } }
+        });
+        
+        video.srcObject = stream;
+        alert('✅ Camera started: ' + cameraSelect.options[cameraSelect.selectedIndex].text);
+      } catch (err) {
+        alert('❌ Error: ' + err.message);
+      }
+    };
+  </script>
+</body>
+</html>
