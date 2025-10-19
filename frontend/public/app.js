@@ -17,6 +17,8 @@ const closeEmergencyBtn = document.getElementById('closeEmergencyBtn');
 const cancelEmergencyBtn = document.getElementById('cancelEmergencyBtn');
 const emergencyVideo = document.getElementById('emergencyVideo');
 const emergencyCanvas = document.getElementById('emergencyCanvas');
+const cameraStreamFloat = document.getElementById('cameraStreamFloat');
+const minimizeBtn = document.getElementById('minimizeBtn');
 
 // State
 let cameraActive = false;
@@ -54,13 +56,33 @@ const modeConfig = {
 
 // Helpers
 function log(...args){ console.log('[VisionAid]', ...args); }
+
 function pushMsg(role, text) {
   const row = document.createElement('div');
   row.className = `msg ${role}`;
+  
+  // Add avatar
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.innerHTML = role === 'bot' 
+    ? `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>`
+    : `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`;
+  
+  const contentWrapper = document.createElement('div');
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.textContent = text;
-  row.appendChild(bubble);
+  
+  // Add timestamp
+  const timestamp = document.createElement('span');
+  timestamp.className = 'bubble-timestamp';
+  timestamp.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  bubble.appendChild(timestamp);
+  
+  contentWrapper.appendChild(bubble);
+  row.appendChild(avatar);
+  row.appendChild(contentWrapper);
+  
   chatWindow.appendChild(row);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
@@ -178,8 +200,10 @@ function switchMode(mode) {
 function loadModeMessages(mode) {
   chatWindow.innerHTML = '';
   const messages = modeConfig[mode].messages;
-  messages.forEach(msg => {
-    pushMsg(msg.role, msg.text);
+  messages.forEach((msg, index) => {
+    setTimeout(() => {
+      pushMsg(msg.role, msg.text);
+    }, index * 100); // Stagger messages slightly for demo effect
   });
 }
 
@@ -313,6 +337,20 @@ function resetEmergencyStatus() {
   document.getElementById('smsStatusText').textContent = 'Preparing message...';
   document.getElementById('locationStatusText').textContent = 'Getting location...';
 }
+
+// Minimize/Maximize camera stream
+if (minimizeBtn) {
+  minimizeBtn.addEventListener('click', () => {
+    cameraStreamFloat.classList.toggle('minimized');
+  });
+}
+
+// Click minimized icon to restore
+cameraStreamFloat.addEventListener('click', (e) => {
+  if (cameraStreamFloat.classList.contains('minimized')) {
+    cameraStreamFloat.classList.remove('minimized');
+  }
+});
 
 // Initialize with food mode
 switchMode('food');

@@ -30,15 +30,26 @@ body {
   position: relative;
 }
 
-/* Subtle pattern overlay */
+/* Subtle animated background patterns */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   background: 
-    radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(16, 185, 129, 0.08) 0%, transparent 50%);
+    radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(16, 185, 129, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.08) 0%, transparent 60%);
   pointer-events: none;
+  animation: patternShift 20s ease-in-out infinite;
+}
+
+@keyframes patternShift {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.05) rotate(2deg);
+  }
 }
 
 .landing-container {
@@ -71,38 +82,45 @@ body::before {
 }
 
 .logo-icon {
-  filter: drop-shadow(0 4px 20px rgba(59, 130, 246, 0.25));
-  animation: gentleFloat 4s ease-in-out infinite;
+  filter: drop-shadow(0 8px 30px rgba(59, 130, 246, 0.3));
+  animation: gentleFloat 6s ease-in-out infinite;
 }
 
 @keyframes gentleFloat {
   0%, 100% {
-    transform: translateY(0);
+    transform: translateY(0) rotate(0deg);
   }
-  50% {
-    transform: translateY(-10px);
+  33% {
+    transform: translateY(-12px) rotate(-2deg);
+  }
+  66% {
+    transform: translateY(-6px) rotate(2deg);
   }
 }
 
-/* Clear, readable title */
+/* Gradient text with shimmer effect */
 .hero-title {
   font-size: 96px;
   font-weight: 800;
   margin-bottom: 30px;
-  color: var(--primary);
-  letter-spacing: -2px;
+  background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 50%, var(--secondary) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -3px;
   line-height: 1;
+  animation: fadeInUp 0.8s ease-out, shimmerGradient 8s ease-in-out infinite;
+  text-shadow: 0 0 80px rgba(59, 130, 246, 0.3);
 }
 
-.hero-description {
-  font-size: 22px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  margin-bottom: 60px;
-  max-width: 800px;
-  margin-left: auto;
-  margin-right: auto;
-  font-weight: 400;
+@keyframes shimmerGradient {
+  0%, 100% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 100% center;
+  }
 }
 
 /* Clean feature cards */
@@ -120,12 +138,34 @@ body::before {
   padding: 40px 30px;
   transition: all 0.3s ease;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  animation: fadeInUp 0.8s ease-out;
+  animation-fill-mode: both;
 }
 
-.feature-card:hover {
-  transform: translateY(-8px);
-  border-color: var(--primary);
-  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.15);
+.feature-card:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.feature-card:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.feature-card:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.feature-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.feature-card:hover::before {
+  opacity: 1;
 }
 
 .feature-card svg {
@@ -151,12 +191,12 @@ body::before {
   line-height: 1.6;
 }
 
-/* Accessible, high-contrast button */
+/* Improved button with better accessibility */
 .start-button {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
   color: #ffffff;
   border: none;
-  padding: 20px 60px;
+  padding: 22px 64px; /* Slightly increased */
   font-size: 20px;
   font-weight: 700;
   border-radius: 16px;
@@ -164,15 +204,47 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 8px 30px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 30px rgba(59, 130, 246, 0.35);
   transition: all 0.3s ease;
   letter-spacing: -0.3px;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+}
+
+.start-button span {
+  position: relative;
+  z-index: 1;
+}
+
+.start-button svg {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.3s ease;
+}
+
+.start-button:hover svg {
+  transform: translateX(5px);
+}
+
+.start-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  transition: left 0.5s;
+}
+
+.start-button:hover::before {
+  left: 100%;
 }
 
 .start-button:hover {
-  background: var(--primary-dark);
-  transform: translateY(-3px);
-  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.4);
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.45);
 }
 
 .start-button:active {
@@ -202,6 +274,7 @@ body::before {
   font-weight: 600;
   color: var(--text-secondary);
   transition: all 0.3s;
+  cursor: pointer;
 }
 
 .badge:hover {
@@ -213,7 +286,8 @@ body::before {
 
 @media (max-width: 768px) {
   .hero-title {
-    font-size: 56px;
+    font-size: 64px;
+    letter-spacing: -2px;
   }
   
   .hero-description {
@@ -227,5 +301,19 @@ body::before {
   .start-button {
     padding: 18px 50px;
     font-size: 18px;
+  }
+  
+  .landing-container {
+    padding: 60px 30px;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-title {
+    font-size: 48px;
+  }
+  
+  .hero-description {
+    font-size: 16px;
   }
 }

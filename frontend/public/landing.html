@@ -3,20 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>A-eye - AI Vision Assistant</title>
+  <title>A-eye - AI Vision Assistant for Accessibility</title>
+  <meta name="description" content="AI-powered vision assistant for visually impaired users. Get instant food nutrition information through voice conversations.">
   <link rel="stylesheet" href="landing-style.css" />
 </head>
 <body>
   <div class="landing-container">
     <div class="hero-section">
       <div class="logo-container">
-        <svg width="80" height="80" viewBox="0 0 24 24" class="logo-icon">
+        <svg width="80" height="80" viewBox="0 0 24 24" class="logo-icon" aria-hidden="true">
           <circle cx="12" cy="12" r="10" fill="url(#gradient1)" opacity="0.2"/>
           <path fill="url(#gradient1)" d="M12 7c-5 0-8.5 3.1-9.8 5 .9 1.2 4.2 5 9.8 5s8.9-3.8 9.8-5c-1.3-1.9-4.8-5-9.8-5Zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"/>
           <defs>
             <linearGradient id="gradient1" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" style="stop-color:#2563eb"/>
-              <stop offset="100%" style="stop-color:#7c3aed"/>
+              <stop offset="50%" style="stop-color:#7c3aed"/>
+              <stop offset="100%" style="stop-color:#10b981"/>
             </linearGradient>
           </defs>
         </svg>
@@ -25,61 +27,70 @@
       <h1 class="hero-title">A-eye</h1>
       
       <p class="hero-description">
-        Your AI-powered vision assistant that helps you understand the world around you. 
-        Point your camera at any food item and get instant nutritional information through natural voice conversations.
+        Your AI-powered vision assistant designed for accessibility. 
+        Point your camera at any food product and get instant nutritional information 
+        through natural voice conversations—completely hands-free.
       </p>
       
       <div class="features-grid">
         <div class="feature-card">
-          <svg width="32" height="32" viewBox="0 0 24 24">
+          <svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M12 3a4 4 0 0 0-4 4v5a4 4 0 0 0 8 0V7a4 4 0 0 0-4-4Z"/>
             <path fill="currentColor" d="M6 11a6 6 0 0 0 12 0h2a8 8 0 0 1-16 0h2Z" opacity="0.5"/>
           </svg>
           <h3>Voice Interaction</h3>
-          <p>Hands-free conversations powered by AI</p>
+          <p>Natural, hands-free conversations powered by advanced AI voice technology</p>
         </div>
         
         <div class="feature-card">
-          <svg width="32" height="32" viewBox="0 0 24 24">
+          <svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M3 9a2 2 0 0 1 2-2h.93c.66 0 1.28-.33 1.66-.89l.81-1.22A2 2 0 0 1 10.07 4h3.86c.66 0 1.28.33 1.66.89l.81 1.22c.38.56 1 .89 1.67.89H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z"/>
           </svg>
           <h3>Real-time Vision</h3>
-          <p>Instant food recognition and analysis</p>
+          <p>Instant food recognition and product analysis using computer vision AI</p>
         </div>
         
         <div class="feature-card">
-          <svg width="32" height="32" viewBox="0 0 24 24">
+          <svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/>
           </svg>
           <h3>Nutrition Insights</h3>
-          <p>Detailed macros and calorie information</p>
+          <p>Comprehensive macros, calories, and ingredient information spoken clearly</p>
         </div>
       </div>
       
-      <button class="start-button" id="startButton">
+      <button class="start-button" id="startButton" aria-label="Start using A-eye">
         <span>Get Started</span>
-        <svg width="20" height="20" viewBox="0 0 24 24">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M9 6l6 6-6 6V6z"/>
         </svg>
       </button>
       
       <div class="tech-badges">
-        <span class="badge">AI Vision</span>
-        <span class="badge">Voice AI</span>
-        <span class="badge">Real-time</span>
+        <span class="badge" role="text">🤖 AI Vision</span>
+        <span class="badge" role="text">🎤 Voice AI</span>
+        <span class="badge" role="text">⚡ Real-time</span>
+        <span class="badge" role="text">♿ Accessible</span>
       </div>
     </div>
   </div>
   
   <script>
     document.getElementById('startButton').addEventListener('click', () => {
-      // Add fade out animation
+      // Add smooth fade out animation
       document.body.style.opacity = '0';
-      document.body.style.transition = 'opacity 0.3s ease-out';
+      document.body.style.transition = 'opacity 0.4s ease-out';
       
       setTimeout(() => {
         window.location.href = 'main.html';
-      }, 300);
+      }, 400);
+    });
+    
+    // Add keyboard accessibility for Enter key
+    document.getElementById('startButton').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.target.click();
+      }
     });
   </script>
 </body>
