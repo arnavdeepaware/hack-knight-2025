@@ -90,7 +90,8 @@ let sessionState = {
   comparisonMode: false,
   lastInteractionTime: Date.now(),
   isFirstUse: true,
-  hasGivenIntroduction: false
+  hasGivenIntroduction: false,
+  lastAnnouncedProduct: null // Track last announced product to prevent spam
 };
 
 // Mode configurations
@@ -232,6 +233,17 @@ async function startCamera() {
 
   try {
     log('🎥 Starting camera...');
+    
+    // ✅ Stop any active voice listening when starting camera
+    if (isListeningForVoice && speechRecognition) {
+      try {
+        log('🔇 Stopping active listening before camera start');
+        speechRecognition.stop();
+        isListeningForVoice = false;
+      } catch (e) {
+        // Ignore errors
+      }
+    }
     
     // Get camera selection (this will request permission)
     const preferredDeviceId = await showCameraSelector();
@@ -477,12 +489,11 @@ async function detectFoodProduct() {
     
     log('📥 Detection result:', result);
 
-    if (result.detected && result.product) {
+    // Check if we got a valid detection with the right structure
+    if (result.detected && result.confidence > 50 && result.product) {
       updateFoodInfoFromDetection(result);
-      // Don't log to chat here if the detection was automatic
-      // Only update the UI silently
     } else {
-      log('ℹ️ No food product detected in frame');
+      log('ℹ️ No food product detected in frame or low confidence');
     }
 
   } catch (error) {
@@ -498,83 +509,142 @@ async function detectFoodProduct() {
 
 // Update food info UI from detection result
 function updateFoodInfoFromDetection(result) {
-  const { product, nutrition, ingredients, allergens, warnings } = result;
+  const { product, nutrition, ingredients, allergens, warnings, message, detected, confidence } = result;
 
-  // Update product header
-  if (product.name) {
-    document.getElementById('productName').textContent = product.name;
-  }
-  if (product.brand) {
-    document.getElementById('productBrand').textContent = product.brand;
-  }
-  if (product.quantity) {
-    document.getElementById('productQuantity').textContent = product.quantity;
-  }
-
-  // Update nutrition values
-  if (nutrition) {
-    if (nutrition.calories !== null) {
-      document.getElementById('calorieValue').textContent = nutrition.calories;
-    }
-    if (nutrition.carbs !== null) {
-      document.getElementById('carbValue').textContent = `${nutrition.carbs}g`;
-    }
-    if (nutrition.protein !== null) {
-      document.getElementById('proteinValue').textContent = `${nutrition.protein}g`;
-    }
-    if (nutrition.fat !== null) {
-      document.getElementById('fatValue').textContent = `${nutrition.fat}g`;
-    }
-    if (nutrition.sugars !== null) {
-      document.getElementById('sugarValue').textContent = `${nutrition.sugars}g`;
-    }
-    if (nutrition.sodium !== null) {
-      document.getElementById('sodiumValue').textContent = `${nutrition.sodium}mg`;
-    }
-    if (nutrition.fiber !== null) {
-      document.getElementById('fiberValue').textContent = `${nutrition.fiber}g`;
-    }
-  }
-
-  // Update ingredients
-  if (ingredients && ingredients.length > 0) {
-    const tagsContainer = document.getElementById('ingredientsTags');
-    if (tagsContainer) {
-      tagsContainer.innerHTML = ingredients
-        .slice(0, 5)
-        .map(ing => `<span class="ingredient-tag">${ing}</span>`)
-        .join('');
-    }
-  }
-
-  // ✅ NEW: Display allergen warnings prominently
-  if (allergens && allergens.length > 0) {
-    const allergenSection = document.createElement('div');
-    allergenSection.className = 'allergen-warning';
-    allergenSection.innerHTML = `
-      <div class="alert-header">
-        <svg width="20" height="20" viewBox="0 0 24 24">
-          <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-        </svg>
-        <strong>ALLERGEN WARNING</strong>
-      </div>
-      <div class="allergen-list">
-        ${allergens.map(allergen => `<span class="allergen-tag-warning">${allergen}</span>`).join('')}
-      </div>
-    `;
+  // Only announce if we have a confident detection
+  if (detected && confidence > 50 && product && product.name) {
+    // Create a unique identifier for this product (brand + name)
+    const productIdentifier = `${product.brand || ''}_${product.name}`.toLowerCase().trim();
+    const lastIdentifier = sessionState.lastAnnouncedProduct;
     
-    // Insert before ingredients
-    const foodCard = document.querySelector('.food-info-card');
-    const ingredientsSection = document.querySelector('.ingredients-section');
-    if (foodCard && ingredientsSection) {
-      foodCard.insertBefore(allergenSection, ingredientsSection);
+    // Check if this is a NEW product (different from last announced)
+    const isNewProduct = !lastIdentifier || lastIdentifier !== productIdentifier;
+    
+    // Store the detected product in session state
+    sessionState.lastScannedProduct = result;
+    sessionState.scanCount++;
+    sessionState.lastInteractionTime = Date.now();
+    
+    // Update UI first (always update UI even for same product)
+    log('✅ Product detected:', product.name);
+    
+    // Update product header
+    if (product.name) {
+      document.getElementById('productName').textContent = product.name;
+    }
+    if (product.brand) {
+      document.getElementById('productBrand').textContent = product.brand;
+    }
+    if (product.quantity) {
+      document.getElementById('productQuantity').textContent = product.quantity;
+    }
+
+    // Update nutrition values
+    if (nutrition) {
+      if (nutrition.calories !== null) {
+        document.getElementById('calorieValue').textContent = nutrition.calories;
+      }
+      if (nutrition.carbs !== null || nutrition.totalCarbs !== null) {
+        document.getElementById('carbValue').textContent = `${nutrition.carbs || nutrition.totalCarbs}g`;
+      }
+      if (nutrition.protein !== null) {
+        document.getElementById('proteinValue').textContent = `${nutrition.protein}g`;
+      }
+      if (nutrition.fat !== null || nutrition.totalFat !== null) {
+        document.getElementById('fatValue').textContent = `${nutrition.fat || nutrition.totalFat}g`;
+      }
+      if (nutrition.sugars !== null) {
+        document.getElementById('sugarValue').textContent = `${nutrition.sugars}g`;
+      }
+      if (nutrition.sodium !== null) {
+        document.getElementById('sodiumValue').textContent = `${nutrition.sodium}mg`;
+      }
+      if (nutrition.fiber !== null) {
+        document.getElementById('fiberValue').textContent = `${nutrition.fiber}g`;
+      }
+    }
+
+    // Update ingredients
+    if (ingredients && ingredients.length > 0) {
+      const tagsContainer = document.getElementById('ingredientsTags');
+      if (tagsContainer) {
+        tagsContainer.innerHTML = ingredients
+          .slice(0, 5)
+          .map(ing => `<span class="ingredient-tag">${ing}</span>`)
+          .join('');
+      }
+    }
+
+    // ✅ Display allergen warnings prominently
+    if (allergens && allergens.length > 0) {
+      const existingWarning = document.querySelector('.allergen-warning');
+      if (existingWarning) {
+        existingWarning.remove();
+      }
+      
+      const allergenSection = document.createElement('div');
+      allergenSection.className = 'allergen-warning';
+      allergenSection.innerHTML = `
+        <div class="alert-header">
+          <svg width="20" height="20" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          </svg>
+          <strong>ALLERGEN WARNING</strong>
+        </div>
+        <div class="allergen-list">
+          ${allergens.map(allergen => `<span class="allergen-tag-warning">${allergen}</span>`).join('')}
+        </div>
+      `;
+      
+      // Insert before ingredients
+      const foodCard = document.querySelector('.food-info-card');
+      const ingredientsSection = document.querySelector('.ingredients-section');
+      if (foodCard && ingredientsSection) {
+        foodCard.insertBefore(allergenSection, ingredientsSection);
+      }
     }
     
-    // Voice alert for allergens
-    speakText(`Warning: This product contains ${allergens.join(', ')}`);
+    // ✅ ONLY announce if this is a NEW product (prevents chat spam)
+    if (isNewProduct) {
+      log('🆕 New product detected - announcing to user');
+      
+      // ✅ CRITICAL: Stop any active voice listening when new scan starts
+      if (isListeningForVoice && speechRecognition) {
+        try {
+          log('🔇 Stopping active listening - new product scan starting');
+          speechRecognition.stop();
+          isListeningForVoice = false;
+        } catch (e) {
+          // Ignore errors
+        }
+      }
+      
+      // Update last announced product
+      sessionState.lastAnnouncedProduct = productIdentifier;
+      
+      // ✅ SIMPLIFIED: Use backend message or simple scan complete
+      // Let Gemini handle the conversational tone instead of being repetitive
+      const scanMessage = message || `Scan complete.`;
+      
+      // Log to chat (only for new products)
+      pushMsg('bot', scanMessage);
+      
+      // Now speak the announcement and start listening
+      speakText(scanMessage).then(() => {
+        // After speaking, automatically start listening for the user's response
+        log('🎤 Auto-starting voice listening after scan announcement');
+        setTimeout(() => {
+          if (!isListeningForVoice && !isSpeaking) {
+            toggleVoiceListening();
+          }
+        }, 500);
+      });
+    } else {
+      log('ℹ️ Same product detected - UI updated but not announcing again (prevents spam)');
+    }
+    
+    log('✅ UI updated with detection results');
   }
-
-  log('✅ UI updated with detection results');
 }
 
 // Event listeners for camera controls
@@ -856,14 +926,25 @@ function getVoiceProfileForContext(text) {
 // ✅ Text-to-Speech using ElevenLabs API with context-aware profiles
 async function speakText(text, customProfile = null) {
   if (!text || !text.trim()) {
-    return;
+    return Promise.resolve();
   }
   
   // Add to queue if already speaking
   if (isSpeaking) {
     audioQueue.push({ text, profile: customProfile });
     log('🔊 Added to speech queue:', text.substring(0, 50) + '...');
-    return;
+    return Promise.resolve();
+  }
+  
+  // ✅ CRITICAL: Stop any active listening while we speak (prevents self-listening loop)
+  if (isListeningForVoice && speechRecognition) {
+    try {
+      log('🔇 Pausing voice recognition while speaking');
+      speechRecognition.stop();
+      isListeningForVoice = false;
+    } catch (e) {
+      // Ignore errors
+    }
   }
   
   isSpeaking = true;
@@ -909,8 +990,7 @@ async function speakText(text, customProfile = null) {
     
     if (result.fallback) {
       log('⚠️ Falling back to browser TTS');
-      speakTextBrowser(text);
-      return;
+      return speakTextBrowser(text);
     }
     
     // Convert base64 to audio and play
@@ -934,8 +1014,10 @@ async function speakText(text, customProfile = null) {
     // ✅ Process queue with profile awareness
     if (audioQueue.length > 0) {
       const nextItem = audioQueue.shift();
-      speakText(nextItem.text, nextItem.profile);
+      return speakText(nextItem.text, nextItem.profile);
     }
+    
+    return Promise.resolve();
     
   } catch (error) {
     console.error('❌ ElevenLabs TTS error:', error);
@@ -943,7 +1025,7 @@ async function speakText(text, customProfile = null) {
     showSpeakingIndicator(false);
     
     // Fallback to browser TTS
-    speakTextBrowser(text);
+    return speakTextBrowser(text);
   }
 }
 
@@ -1021,28 +1103,41 @@ async function playAudioWithHTML5(audioUrl) {
 
 // ✅ Fallback: Browser TTS
 function speakTextBrowser(text) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(voice => 
-      voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')
-    );
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
+  return new Promise((resolve, reject) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(voice => 
+        voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')
+      );
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      
+      utterance.onend = () => {
+        log('🔊 Browser TTS finished');
+        resolve();
+      };
+      
+      utterance.onerror = (error) => {
+        console.error('Browser TTS error:', error);
+        reject(error);
+      };
+      
+      window.speechSynthesis.speak(utterance);
+      log('🔊 Speaking (browser fallback):', text.substring(0, 50) + '...');
+    } else {
+      log('⚠️ Speech synthesis not supported');
+      resolve();
     }
-    
-    window.speechSynthesis.speak(utterance);
-    log('🔊 Speaking (browser fallback):', text.substring(0, 50) + '...');
-  } else {
-    log('⚠️ Speech synthesis not supported');
-  }
+  });
 }
 
 // ✅ Helper: Convert base64 to Blob
@@ -1066,7 +1161,7 @@ function showSpeakingIndicator(show) {
       
       const statusText = indicator.querySelector('.status-text');
       if (statusText) {
-        statusText.textContent = '🔊 Speaking... (ElevenLabs)';
+        statusText.textContent = '🔊 Speaking... (please wait)';
       }
     } else {
       indicator.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%)';
@@ -1074,7 +1169,12 @@ function showSpeakingIndicator(show) {
       
       const statusText = indicator.querySelector('.status-text');
       if (statusText) {
-        statusText.textContent = '🎤 Voice-only • Listening...';
+        // Check if we're listening
+        if (isListeningForVoice) {
+          statusText.textContent = '🎤 Listening for your response...';
+        } else {
+          statusText.textContent = '🎤 Say "Hey Vision" to activate';
+        }
       }
     }
   }
@@ -1131,6 +1231,9 @@ function initVoiceRecognition() {
     isListeningForVoice = true;
     log('🎤 Listening for speech...');
     
+    // Update UI to show listening state
+    showSpeakingIndicator(false);
+    
     // Pause continuous recognition when explicit listening starts
     pauseContinuousRecognition();
   };
@@ -1138,6 +1241,13 @@ function initVoiceRecognition() {
   speechRecognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
     log('📝 You said:', transcript);
+    
+    // ✅ CRITICAL: Double-check we're not speaking (safety check)
+    if (isSpeaking) {
+      log('🔇 Ignoring - we are currently speaking');
+      return;
+    }
+    
     pushMsg('user', transcript);
     
     handleVoiceQuery(transcript);
@@ -1150,11 +1260,18 @@ function initVoiceRecognition() {
   speechRecognition.onerror = (event) => {
     console.error('Speech recognition error:', event.error);
     isListeningForVoice = false;
+    showSpeakingIndicator(false);
     
     if (event.error === 'not-allowed') {
       alert('Microphone permission denied. Please allow microphone access in your browser settings.');
     } else if (event.error === 'no-speech') {
       pushMsg('bot', "I didn't hear anything. Please try again.");
+      // Auto-restart listening
+      setTimeout(() => {
+        if (!isListeningForVoice) {
+          toggleVoiceListening();
+        }
+      }, 1000);
     } else if (event.error === 'aborted') {
       log('🔄 Speech recognition was aborted - this is usually not an issue');
       // Don't show error message for aborted as it's often caused by system/browser
@@ -1167,6 +1284,7 @@ function initVoiceRecognition() {
   speechRecognition.onend = () => {
     isListeningForVoice = false;
     log('🔇 Stopped listening');
+    showSpeakingIndicator(false);
     
     // Resume continuous recognition after explicit listening ends
     resumeContinuousRecognition();
@@ -1261,6 +1379,12 @@ function initContinuousRecognition() {
   continuousRecognition.onresult = (event) => {
     const result = event.results[event.results.length - 1];
     
+    // ✅ CRITICAL: Don't process if we're currently speaking (prevents self-listening)
+    if (isSpeaking) {
+      log('🔇 Ignoring input while speaking');
+      return;
+    }
+    
     // Only process if we have a confident result
     if (result[0].confidence > 0.6) {
       const transcript = result[0].transcript.toLowerCase().trim();
@@ -1269,18 +1393,32 @@ function initContinuousRecognition() {
       // Update last interaction time to track activity
       sessionState.lastInteractionTime = Date.now();
       
+      // ✅ Check for camera control commands (don't trigger chat)
+      if (transcript.includes('start camera') || transcript.includes('open camera') || 
+          transcript.includes('turn on camera') || transcript.includes('enable camera')) {
+        log('📷 Camera start command from continuous recognition');
+        showWakeWordIndicator("Starting camera...");
+        if (!cameraActive) {
+          startCamera();
+        }
+        return; // Don't process as wake word
+      }
+      
+      if (transcript.includes('stop camera') || transcript.includes('close camera') || 
+          transcript.includes('turn off camera') || transcript.includes('disable camera')) {
+        log('📷 Camera stop command from continuous recognition');
+        showWakeWordIndicator("Stopping camera...");
+        if (cameraActive) {
+          stopCamera();
+        }
+        return; // Don't process as wake word
+      }
+      
       // Check for assistant wake words - using locally defined VOICE_COMMANDS
       if (VOICE_COMMANDS.ASSISTANT_WAKE_WORDS.some(wake => transcript.includes(wake))) {
         log('🎙️ Assistant wake word detected: ' + transcript);
         showWakeWordIndicator("Assistant activated!");
         simulateAssistantButtonClick();
-      }
-      
-      // Check for camera commands
-      if (VOICE_COMMANDS.CAMERA_ACTIVATION.some(cmd => transcript.includes(cmd))) {
-        log('📷 Camera activation command detected: ' + transcript);
-        showWakeWordIndicator("Starting camera...");
-        simulateCameraButtonClick();
       }
       
       // Check for scan commands
@@ -1636,12 +1774,58 @@ async function handleVoiceQuery(query) {
   
   log('💬 Processing query:', query);
   
+  // ✅ CHECK FOR SPECIAL COMMANDS FIRST (before sending to chat)
+  const lowerQuery = query.toLowerCase().trim();
+  
+  // Camera control commands - handle locally, don't send to chat
+  if (lowerQuery.includes('start camera') || lowerQuery.includes('open camera') || 
+      lowerQuery.includes('turn on camera') || lowerQuery.includes('enable camera')) {
+    log('📷 Camera command detected - executing locally');
+    if (!cameraActive) {
+      pushMsg('user', query);
+      pushMsg('bot', 'Starting camera...');
+      await startCamera();
+    } else {
+      pushMsg('user', query);
+      pushMsg('bot', 'Camera is already running.');
+    }
+    
+    // Restart listening after handling camera command
+    setTimeout(() => {
+      if (!isListeningForVoice) {
+        toggleVoiceListening();
+      }
+    }, 800);
+    return; // Don't send to chat API
+  }
+  
+  // Stop camera commands
+  if (lowerQuery.includes('stop camera') || lowerQuery.includes('close camera') || 
+      lowerQuery.includes('turn off camera') || lowerQuery.includes('disable camera')) {
+    log('📷 Camera stop command detected - executing locally');
+    if (cameraActive) {
+      pushMsg('user', query);
+      pushMsg('bot', 'Stopping camera...');
+      stopCamera();
+    } else {
+      pushMsg('user', query);
+      pushMsg('bot', 'Camera is not running.');
+    }
+    
+    setTimeout(() => {
+      if (!isListeningForVoice) {
+        toggleVoiceListening();
+      }
+    }, 800);
+    return; // Don't send to chat API
+  }
+  
   try {
     // Show thinking indicator
     pushMsg('bot', '💭 Thinking...');
     
     // Gather context about the current product being viewed (if any)
-    const foodContext = {
+    const foodContext = sessionState.lastScannedProduct || {
       product: {
         name: document.getElementById('productName')?.textContent || null,
         brand: document.getElementById('productBrand')?.textContent || null,
@@ -1688,7 +1872,17 @@ async function handleVoiceQuery(query) {
     // Display and speak the response
     if (result.response) {
       pushMsg('bot', result.response);
-      speakText(result.response);
+      
+      // Speak the response and then automatically restart listening
+      await speakText(result.response);
+      
+      // After speaking, automatically restart listening for continuous conversation
+      log('🎤 Auto-restarting voice listening for continuous conversation');
+      setTimeout(() => {
+        if (!isListeningForVoice) {
+          toggleVoiceListening();
+        }
+      }, 800);
       
       // Process any actions returned by the backend
       if (result.actions) {
@@ -1710,7 +1904,14 @@ async function handleVoiceQuery(query) {
     // Show error message
     const errorMsg = "Sorry, I had trouble processing that request. Please try again.";
     pushMsg('bot', errorMsg);
-    speakText(errorMsg);
+    
+    // Speak error and restart listening
+    await speakText(errorMsg);
+    setTimeout(() => {
+      if (!isListeningForVoice) {
+        toggleVoiceListening();
+      }
+    }, 800);
   }
 }
 
