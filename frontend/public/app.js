@@ -17,6 +17,44 @@ const cancelEmergencyBtn = document.getElementById('cancelEmergencyBtn');
 const emergencyVideo = document.getElementById('emergencyVideo');
 const detectingBadge = document.getElementById('detectingBadge');
 
+// Define voice command constants FIRST to avoid reference errors
+const VOICE_SCRIPTS = {
+  WELCOME: "Welcome to A-eye, your visual assistance companion. I'm ready to help you identify food products and provide nutritional information.",
+  FIRST_SCAN_SUCCESS: "Great! I've successfully identified your first item. You can ask me about calories, ingredients, or if it contains allergens.",
+  HELP_MESSAGE: "I can help you identify food products and provide nutritional information. Say phrases like 'What am I holding' or 'Tell me about this food'.",
+  INACTIVITY_PROMPT: "I'm still here to help. If you have a food item to scan, just say 'What is in my hand' or 'Hey Vision' to activate me.",
+  SCANNING_START: "Starting to scan. Please hold the item steady for a moment.",
+  SCANNING_NO_RESULT: "I couldn't identify any food product. Try holding it closer to the camera, or in better lighting.",
+  ALLERGEN_WARNING: "Important: This product contains allergens that might affect some individuals. Please be careful.",
+  CAMERA_STARTED: "Camera activated. I'm ready to help you identify food products. What would you like me to scan?",
+  CAMERA_ERROR: "I couldn't access the camera. Please make sure your browser has permission to use the camera."
+};
+
+const VOICE_COMMANDS = {
+  // Assistant wake words - activates the voice assistant (replaces "Click to Talk")
+  ASSISTANT_WAKE_WORDS: [
+    "hi helper", "vision bot", "assistant wake up", "listen to me", "hey vision",
+    "hello a eye", "a eye help me", "start listening"
+  ],
+  
+  // Camera activation commands (replaces "Start Camera" click)
+  CAMERA_ACTIVATION: [
+    "scan now", "start scanning", "turn on camera", "camera on", "start camera",
+    "let me see", "enable vision", "show me"
+  ],
+  
+  // Scan/detection commands that also start camera if needed
+  SCAN_COMMANDS: [
+    "what is in my hand", "what am i holding", "what's in my hand", "scan this", 
+    "detect this", "what is this product", "what food is this", "identify this",
+    "tell me about this", "what am I looking at", "analyze this food"
+  ],
+  
+  // Mode switching commands
+  FOOD_MODE: ["food mode", "nutrition mode", "switch to food"],
+  CASH_MODE: ["cash mode", "money mode", "switch to cash"]
+};
+
 // State
 let cameraActive = false;
 let drawLoopId = null;
@@ -25,28 +63,50 @@ let currentLanguage = 'en';
 let emergencyActive = false;
 let emergencyStream = null;
 
+// Add missing variables for voice control state
+let continuousRecognition = null;
+let isListeningForCommands = false;
+let wakePhraseDetected = false; 
+let onboardingActive = false;
+let currentOnboardingStep = 0;
+
+// Add recognition state variables
+let recognitionAttempts = 0;
+let maxRecognitionAttempts = 5;
+let recognitionBackoffTime = 1000; // Start with 1 second, will increase on failures
+let recognitionTimeout = null;
+
+// Voice settings
+let currentVoice = 'scarlet';
+let currentProfile = 'default';
+let isSpeaking = false;
+let audioQueue = [];
+let audioContext = null;
+
+// Initialize session state globally
+let sessionState = {
+  scanCount: 0,
+  lastScannedProduct: null,
+  comparisonMode: false,
+  lastInteractionTime: Date.now(),
+  isFirstUse: true,
+  hasGivenIntroduction: false
+};
+
 // Mode configurations
 const modeConfig = {
   food: {
     name: 'Food Info',
     color: '#059669',
     messages: [
-      { role: 'bot', text: 'Hi! I\'m A-eye, your vision assistant. Point your camera at food and ask me about nutrition.' },
-      { role: 'user', text: 'What am I looking at?' },
-      { role: 'bot', text: 'I see a bowl of cooked white rice. Would you like to know the nutritional information?' },
-      { role: 'user', text: 'Yes, tell me the calories and macros' },
-      { role: 'bot', text: 'One cup of cooked white rice contains approximately 205 calories. The macros are: 45g carbs, 4g protein, 0.4g fat, and 0.6g fiber.' }
+      { role: 'bot', text: 'Food Info mode activated. Point your camera at any food product and ask me about it.' }
     ]
   },
   cash: {
     name: 'Cash Mode',
     color: '#d97706',
     messages: [
-      { role: 'bot', text: 'Cash mode activated. I can help you identify bills and coins.' },
-      { role: 'user', text: 'What bill is this?' },
-      { role: 'bot', text: 'This is a $20 bill. United States currency, Federal Reserve Note.' },
-      { role: 'user', text: 'Can you count these bills?' },
-      { role: 'bot', text: 'I see three bills: two $20 bills and one $10 bill. Total: $50.' }
+      { role: 'bot', text: 'Cash mode activated. I can help you identify bills and coins.' }
     ]
   }
 };
@@ -57,10 +117,14 @@ const API_BASE_URL = 'http://localhost:3001/api';
 // Detection state
 let isDetecting = false;
 let lastDetectionTime = 0;
-const DETECTION_INTERVAL = 5000; // ✅ Increase from 3000ms to 5000ms (5 seconds)
+const DETECTION_INTERVAL = 5000; // 5 seconds
 
 // Rate limit handling
 let rateLimitWarningShown = false;
+
+// Voice state
+let isListeningForVoice = false;
+let speechRecognition = null;
 
 // Helpers
 function log(...args) { 
@@ -158,12 +222,12 @@ async function showCameraSelector() {
   }
 }
 
-// Camera start function
+// Enhanced camera start function with voice feedback
 async function startCamera() {
   if (!video || !canvas || !ctx) {
     log('Error: Video or canvas element not found');
     alert('Camera elements not found. Please refresh the page.');
-    return;
+    return Promise.reject('Camera elements not found');
   }
 
   try {
@@ -255,6 +319,13 @@ async function startCamera() {
     // Add message to chat
     pushMsg('bot', `Camera is live! ${videoTrack ? `Using: ${videoTrack.label}` : 'Ready to detect food items.'}`);
     
+    // After camera starts successfully, provide voice feedback
+    if (VOICE_SCRIPTS && VOICE_SCRIPTS.CAMERA_STARTED) {
+      speakText(VOICE_SCRIPTS.CAMERA_STARTED);
+    }
+    
+    return Promise.resolve();
+    
   } catch (err) {
     log('❌ Camera error:', err.message);
     
@@ -281,7 +352,7 @@ async function startCamera() {
         drawVideoFrame();
         log('✅ Camera started with fallback settings');
         pushMsg('bot', 'Camera connected with default settings.');
-        return;
+        return Promise.resolve();
       } catch (retryErr) {
         errorMsg += '\n\nFallback also failed: ' + retryErr.message;
       }
@@ -289,6 +360,7 @@ async function startCamera() {
     
     alert(errorMsg);
     console.error('Camera error details:', err);
+    return Promise.reject(err);
   }
 }
 
@@ -346,7 +418,7 @@ function drawVideoFrame() {
   drawLoopId = requestAnimationFrame(drawVideoFrame);
 }
 
-// Function to send frame to backend for detection
+// Function to send frame to backend for detection - Remove chat logging
 async function detectFoodProduct() {
   if (!cameraActive || !canvas || isDetecting) {
     return;
@@ -376,7 +448,8 @@ async function detectFoodProduct() {
       },
       body: JSON.stringify({
         image: imageData,
-        mode: currentMode
+        mode: currentMode,
+        suppressChat: true  // Add flag to suppress chat logging
       })
     });
 
@@ -406,7 +479,8 @@ async function detectFoodProduct() {
 
     if (result.detected && result.product) {
       updateFoodInfoFromDetection(result);
-      pushMsg('bot', result.message || `I detected ${result.product.name}. Here's the nutrition info.`);
+      // Don't log to chat here if the detection was automatic
+      // Only update the UI silently
     } else {
       log('ℹ️ No food product detected in frame');
     }
@@ -551,16 +625,19 @@ function switchMode(mode) {
   log(`Switched to ${mode} mode`);
 }
 
+// Update the function to load initial messages for modes
 function loadModeMessages(mode) {
   if (!chatWindow) return;
   
   chatWindow.innerHTML = '';
   const messages = modeConfig[mode]?.messages || [];
-  messages.forEach((msg, index) => {
-    setTimeout(() => {
-      pushMsg(msg.role, msg.text);
-    }, index * 100);
-  });
+  if (messages.length > 0) {
+    messages.forEach((msg, index) => {
+      setTimeout(() => {
+        pushMsg(msg.role, msg.text);
+      }, index * 100);
+    });
+  }
 }
 
 // Language handling
@@ -729,13 +806,6 @@ log('Start button:', startCameraBtn ? 'Found' : 'Not found');
 // ========================================
 // ELEVENLABS TTS INTEGRATION (COMPLETE)
 // ========================================
-
-// Voice settings
-let currentVoice = 'scarlet';
-let currentProfile = 'default';
-let isSpeaking = false;
-let audioQueue = [];
-let audioContext = null;
 
 // ✅ Initialize audio context (must be triggered by user interaction)
 function initAudioContext() {
@@ -1033,17 +1103,23 @@ function stopSpeaking() {
 // VOICE RECOGNITION FEATURES (UNIFIED)
 // ========================================
 
-// Voice state
-let isListeningForVoice = false;
-let speechRecognition = null;
-
-// Initialize Web Speech API (browser built-in) - SINGLE IMPLEMENTATION
+// Define the speech recognition initialization function just once
 function initVoiceRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   
   if (!SpeechRecognition) {
     log('⚠️ Speech recognition not supported in this browser');
     return false;
+  }
+  
+  // Cancel any existing instance to avoid conflicts
+  if (speechRecognition) {
+    try {
+      speechRecognition.abort();
+      speechRecognition.stop();
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
   }
   
   speechRecognition = new SpeechRecognition();
@@ -1055,18 +1131,20 @@ function initVoiceRecognition() {
     isListeningForVoice = true;
     log('🎤 Listening for speech...');
     
-    const btn = document.getElementById('voiceToggleBtn');
-    if (btn) {
-      btn.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-      btn.querySelector('span').textContent = 'Listening...';
-    }
+    // Pause continuous recognition when explicit listening starts
+    pauseContinuousRecognition();
   };
   
   speechRecognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
     log('📝 You said:', transcript);
     pushMsg('user', transcript);
+    
     handleVoiceQuery(transcript);
+    
+    // Reset attempt counter on successful recognition
+    recognitionAttempts = 0;
+    recognitionBackoffTime = 1000;
   };
   
   speechRecognition.onerror = (event) => {
@@ -1077,6 +1155,12 @@ function initVoiceRecognition() {
       alert('Microphone permission denied. Please allow microphone access in your browser settings.');
     } else if (event.error === 'no-speech') {
       pushMsg('bot', "I didn't hear anything. Please try again.");
+    } else if (event.error === 'aborted') {
+      log('🔄 Speech recognition was aborted - this is usually not an issue');
+      // Don't show error message for aborted as it's often caused by system/browser
+    } else {
+      // For other errors, try restarting after a delay if it was a requested session
+      setTimeout(() => toggleVoiceListening(), 1000);
     }
   };
   
@@ -1084,18 +1168,15 @@ function initVoiceRecognition() {
     isListeningForVoice = false;
     log('🔇 Stopped listening');
     
-    const btn = document.getElementById('voiceToggleBtn');
-    if (btn) {
-      btn.style.background = 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)';
-      btn.querySelector('span').textContent = 'Click to Talk';
-    }
+    // Resume continuous recognition after explicit listening ends
+    resumeContinuousRecognition();
   };
   
   log('✅ Voice recognition initialized');
   return true;
 }
 
-// Toggle voice listening
+// Modified toggle voice listening to handle conflicts better
 function toggleVoiceListening() {
   if (!speechRecognition) {
     const initialized = initVoiceRecognition();
@@ -1106,155 +1187,49 @@ function toggleVoiceListening() {
   }
   
   if (isListeningForVoice) {
-    speechRecognition.stop();
+    try {
+      speechRecognition.stop();
+    } catch (error) {
+      console.error('Error stopping speech recognition:', error);
+      // Force reset the state
+      isListeningForVoice = false;
+    }
   } else {
     try {
-      speechRecognition.start();
+      // Ensure we have permission before starting
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(() => {
+          // Pause continuous recognition to avoid conflicts
+          pauseContinuousRecognition();
+          
+          // Start our manual recognition
+          try {
+            speechRecognition.start();
+          } catch (error) {
+            console.error('Error starting speech recognition:', error);
+            if (error.message.includes('already started')) {
+              speechRecognition.stop();
+              setTimeout(() => {
+                try {
+                  speechRecognition.start();
+                } catch (e) {
+                  console.error('Still failed after retry:', e);
+                }
+              }, 100);
+            }
+          }
+        })
+        .catch(err => {
+          console.error('Microphone permission error:', err);
+          alert('Microphone access is required for voice commands. Please allow access and try again.');
+        });
     } catch (error) {
-      console.error('Error starting speech recognition:', error);
-      if (error.message.includes('already started')) {
-        speechRecognition.stop();
-        setTimeout(() => speechRecognition.start(), 100);
-      }
+      console.error('Fatal error in voice recognition:', error);
     }
   }
 }
 
-// Handle voice query - connect to backend
-async function handleVoiceQuery(query) {
-  log('💬 Processing query:', query);
-  
-  try {
-    pushMsg('bot', '💭 Thinking...');
-    
-    const foodContext = {
-      product: {
-        name: document.getElementById('productName')?.textContent || null,
-        brand: document.getElementById('productBrand')?.textContent || null,
-        quantity: document.getElementById('productQuantity')?.textContent || null
-      },
-      nutrition: {
-        calories: document.getElementById('calorieValue')?.textContent || null,
-        carbs: document.getElementById('carbValue')?.textContent.replace('g', '') || null,
-        protein: document.getElementById('proteinValue')?.textContent.replace('g', '') || null,
-        fat: document.getElementById('fatValue')?.textContent.replace('g', '') || null,
-        sugars: document.getElementById('sugarValue')?.textContent.replace('g', '') || null,
-        sodium: document.getElementById('sodiumValue')?.textContent.replace('mg', '') || null
-      }
-    };
-    
-    const response = await fetch(`${API_BASE_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: query,
-        foodContext: foodContext,
-        mode: currentMode
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    // Remove thinking indicator
-    const thinkingMsg = chatWindow.lastElementChild;
-    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {
-      thinkingMsg.remove();
-    }
-    
-    // Display and speak response
-    const aiResponse = result.response;
-    pushMsg('bot', aiResponse);
-    speakText(aiResponse);  // ✅ This calls the ElevenLabs version above
-    
-  } catch (error) {
-    console.error('❌ Voice query error:', error);
-    
-    const thinkingMsg = chatWindow.lastElementChild;
-    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {
-      thinkingMsg.remove();
-    }
-    
-    const errorMsg = 'Sorry, I had trouble processing that. Could you try again?';
-    pushMsg('bot', errorMsg);
-    speakText(errorMsg);  // ✅ This calls the ElevenLabs version above
-  }
-}
-
-// Attach voice button click handler
-const voiceToggleBtn = document.getElementById('voiceToggleBtn');
-if (voiceToggleBtn) {
-  voiceToggleBtn.addEventListener('click', toggleVoiceListening);
-  log('✅ Voice button listener attached');
-}
-
-// Check browser support
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  log('✅ Speech recognition available');
-} else {
-  log('⚠️ Speech recognition not supported in this browser');
-  if (voiceToggleBtn) {
-    voiceToggleBtn.disabled = true;
-    voiceToggleBtn.style.opacity = '0.5';
-    voiceToggleBtn.title = 'Speech recognition not supported';
-  }
-}
-
-// ✅ Initialize audio on first user interaction
-document.addEventListener('click', () => {
-  initAudioContext();
-}, { once: true });
-
-document.addEventListener('keydown', () => {
-  initAudioContext();
-}, { once: true });
-
-log('✅ ElevenLabs TTS fully configured with context-aware voice profiles');
-
-// Voice automation configuration
-const VOICE_COMMANDS = {
-  // Assistant wake words - activates the voice assistant (replaces "Click to Talk")
-  ASSISTANT_WAKE_WORDS: [
-    "hi helper",
-    "vision bot", 
-    "assistant wake up", 
-    "listen to me", 
-    "hey vision"
-  ],
-  
-  // Camera activation commands (replaces "Start Camera" click)
-  CAMERA_ACTIVATION: [
-    "scan now", 
-    "start scanning",
-    "turn on camera", 
-    "camera on", 
-    "start camera"
-  ],
-  
-  // Scan/detection commands that also start the camera if needed
-  SCAN_COMMANDS: [
-    "what is in my hand", 
-    "what am i holding", 
-    "what's in my hand", 
-    "scan this", 
-    "detect this",
-    "what is this product",
-    "what food is this"
-  ],
-  
-  // Mode switching commands
-  FOOD_MODE: ["food mode", "nutrition mode", "switch to food"],
-  CASH_MODE: ["cash mode", "money mode", "switch to cash"]
-};
-
-// Continuous voice recognition for command automation
-let continuousRecognition = null;
-let isListeningForCommands = false;
-
-// Initialize continuous voice recognition to listen for commands
+// Improve the continuous recognition implementation
 function initContinuousRecognition() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     log('⚠️ Speech recognition not supported in this browser');
@@ -1262,6 +1237,17 @@ function initContinuousRecognition() {
   }
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  // Clean up any existing instance
+  if (continuousRecognition) {
+    try {
+      continuousRecognition.abort();
+      continuousRecognition.stop();
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
+  }
+  
   continuousRecognition = new SpeechRecognition();
   continuousRecognition.continuous = true;
   continuousRecognition.interimResults = true;
@@ -1280,7 +1266,10 @@ function initContinuousRecognition() {
       const transcript = result[0].transcript.toLowerCase().trim();
       log('👂 Heard: ' + transcript);
       
-      // Check for assistant wake words
+      // Update last interaction time to track activity
+      sessionState.lastInteractionTime = Date.now();
+      
+      // Check for assistant wake words - using locally defined VOICE_COMMANDS
       if (VOICE_COMMANDS.ASSISTANT_WAKE_WORDS.some(wake => transcript.includes(wake))) {
         log('🎙️ Assistant wake word detected: ' + transcript);
         showWakeWordIndicator("Assistant activated!");
@@ -1294,7 +1283,7 @@ function initContinuousRecognition() {
         simulateCameraButtonClick();
       }
       
-      // Check for scan commands (these also start camera if needed)
+      // Check for scan commands
       if (VOICE_COMMANDS.SCAN_COMMANDS.some(cmd => transcript.includes(cmd))) {
         log('🔍 Scan command detected: ' + transcript);
         handleScanCommand(transcript);
@@ -1310,55 +1299,262 @@ function initContinuousRecognition() {
         log('💵 Cash mode command detected');
         switchMode('cash');
       }
+      
+      // Reset attempt counter on successful recognition
+      recognitionAttempts = 0;
+      recognitionBackoffTime = 1000;
     }
   };
   
   continuousRecognition.onerror = (event) => {
-    // Only log serious errors, not no-speech
-    if (event.error !== 'no-speech') {
+    // Handle errors intelligently
+    if (event.error === 'aborted') {
+      log('🔄 Continuous recognition aborted - will restart with backoff');
+      // Don't increment attempt counter for aborted as it might be intentional
+    } else if (event.error === 'no-speech') {
+      // Ignore no-speech errors (normal when nothing is said)
+    } else {
       console.error('Continuous recognition error:', event.error);
+      recognitionAttempts++;
+      
+      // Increase backoff time exponentially
+      recognitionBackoffTime = Math.min(recognitionBackoffTime * 1.5, 10000); // Max 10 second backoff
     }
   };
   
   continuousRecognition.onend = () => {
     isListeningForCommands = false;
-    log('🔇 Continuous recognition ended - restarting');
+    log('🔇 Continuous recognition ended - will restart with backoff');
     
-    // Auto-restart if it ends
-    setTimeout(() => {
-      startContinuousRecognition();
-    }, 1000);
+    // Clear any pending restart
+    if (recognitionTimeout) {
+      clearTimeout(recognitionTimeout);
+      recognitionTimeout = null;
+    }
+    
+    // Only try to restart if we haven't hit the max attempts
+    if (recognitionAttempts < maxRecognitionAttempts) {
+      log(`🔄 Restarting continuous recognition in ${recognitionBackoffTime/1000} seconds (attempt ${recognitionAttempts+1}/${maxRecognitionAttempts})`);
+      recognitionTimeout = setTimeout(() => {
+        startContinuousRecognition();
+      }, recognitionBackoffTime);
+    } else {
+      log('⚠️ Max recognition attempts reached. Stopping automatic restarts.');
+      // Show a user-facing notification that voice commands are disabled
+      showWakeWordIndicator("Voice commands disabled. Please refresh the page to re-enable.");
+    }
   };
   
-  startContinuousRecognition();
+  // Start recognition with a short delay
+  setTimeout(() => {
+    startContinuousRecognition();
+  }, 500);
+  
+  // Set up inactivity checker
+  setUpInactivityChecker();
+  
   return true;
 }
 
-// Start continuous listening
+// Define the startContinuousRecognition function once and only once
 function startContinuousRecognition() {
-  if (!continuousRecognition) return;
+  if (!continuousRecognition) {
+    log('⚠️ Cannot start recognition - not initialized');
+    return;
+  }
   
-  try {
-    continuousRecognition.start();
-    log('🎙️ Continuous recognition started');
-  } catch (err) {
-    console.error('Error starting continuous recognition:', err);
-    
-    // If already started, stop and restart
-    if (err.message.includes('already started')) {
-      continuousRecognition.stop();
-      setTimeout(() => {
-        try {
-          continuousRecognition.start();
-        } catch (e) {
-          console.error('Failed to restart recognition:', e);
+  // Don't try to start if explicit listening is active
+  if (isListeningForVoice) {
+    log('⚠️ Skipping continuous recognition start - explicit listening active');
+    return;
+  }
+  
+  // Check if we have microphone permission first
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(() => {
+      try {
+        continuousRecognition.start();
+        log('🎧 Continuous command listening started');
+        isListeningForCommands = true;
+      } catch (err) {
+        console.error('Error starting continuous recognition:', err);
+        
+        // Handle already started error by stopping and restarting
+        if (err.message && err.message.includes('already started')) {
+          log('🔄 Recognition already running - restarting');
+          try {
+            continuousRecognition.stop();
+            
+            setTimeout(() => {
+              try {
+                if (!isListeningForVoice) { // Double-check before starting
+                  continuousRecognition.start();
+                  log('🎧 Recognition restarted successfully');
+                }
+              } catch (e) {
+                console.error('Failed to restart recognition:', e);
+                recognitionAttempts++;
+              }
+            }, 500);
+          } catch (stopErr) {
+            console.error('Error stopping recognition during restart:', stopErr);
+          }
+        } else {
+          recognitionAttempts++;
         }
-      }, 500);
+      }
+    })
+    .catch(err => {
+      console.error('Microphone permission error:', err);
+      recognitionAttempts++;
+      // Don't show alert here as it might be annoying in background mode
+      log('⚠️ Microphone permission denied for continuous recognition');
+    });
+}
+
+// Add functions to pause and resume continuous recognition
+function pauseContinuousRecognition() {
+  if (continuousRecognition && isListeningForCommands) {
+    log('⏸️ Pausing continuous recognition to avoid conflicts');
+    try {
+      continuousRecognition.stop();
+    } catch (err) {
+      console.error('Error stopping continuous recognition:', err);
     }
   }
 }
 
-// Show visual indicator for wake word detection
+function resumeContinuousRecognition() {
+  // Only resume if not already listening
+  if (continuousRecognition && !isListeningForCommands && !isListeningForVoice) {
+    log('▶️ Resuming continuous recognition');
+    setTimeout(() => {
+      try {
+        startContinuousRecognition();
+      } catch (err) {
+        console.error('Error resuming continuous recognition:', err);
+      }
+    }, 500);
+  }
+}
+
+// Add a periodic permission check function to detect if microphone access is revoked
+function checkMicrophonePermission() {
+  navigator.permissions.query({ name: 'microphone' })
+    .then(permissionStatus => {
+      log(`🎤 Microphone permission status: ${permissionStatus.state}`);
+      
+      if (permissionStatus.state === 'denied') {
+        // Show a user-facing notification that microphone access is needed
+        showWakeWordIndicator("Microphone access denied. Voice features disabled.");
+        
+        // Stop any active recognition
+        if (continuousRecognition) {
+          try {
+            continuousRecognition.stop();
+          } catch(e) { /* ignore */ }
+        }
+        
+        if (speechRecognition) {
+          try {
+            speechRecognition.stop();
+          } catch(e) { /* ignore */ }
+        }
+      }
+      
+      // Listen for changes to permission
+      permissionStatus.onchange = function() {
+        log(`🎤 Microphone permission changed to: ${this.state}`);
+        
+        if (this.state === 'granted') {
+          // Permission granted again, restart recognition
+          recognitionAttempts = 0;
+          recognitionBackoffTime = 1000;
+          initContinuousRecognition();
+        }
+      };
+    })
+    .catch(error => {
+      // Some browsers don't support the permissions API
+      log('Permissions API not supported, cannot monitor microphone permission status');
+    });
+}
+
+// Update the DOMContentLoaded handler to include permission check
+document.addEventListener('DOMContentLoaded', () => {
+  // Check microphone permissions
+  checkMicrophonePermission();
+  
+  // Initialize continuous recognition with a delay
+  setTimeout(() => {
+    initContinuousRecognition();
+  }, 2000);
+});
+
+// Add CSS for voice feedback (if not already present)
+const voiceFeedbackStyle = document.createElement('style');
+voiceFeedbackStyle.textContent = `
+.wake-indicator {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.95) 0%, rgba(124, 58, 237, 0.95) 100%);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  z-index: 9999;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+  transition: opacity 0.3s ease;
+}
+.wake-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+`;
+document.head.appendChild(voiceFeedbackStyle);
+
+// Add the missing setUpInactivityChecker function
+function setUpInactivityChecker() {
+  // Check every 45 seconds for user inactivity
+  setInterval(() => {
+    const now = Date.now();
+    const inactiveTime = now - sessionState.lastInteractionTime;
+    
+    // If inactive for more than 45 seconds and camera is active but not speaking
+    if (inactiveTime > 45000 && cameraActive && !isSpeaking) {
+      // Provide a gentle reminder
+      if (VOICE_SCRIPTS && VOICE_SCRIPTS.INACTIVITY_PROMPT) {
+        speakText(VOICE_SCRIPTS.INACTIVITY_PROMPT);
+      } else {
+        speakText("I'm still here if you need help. Say 'Hey Vision' to activate me.");
+      }
+      
+      // Reset timer after reminder
+      sessionState.lastInteractionTime = now;
+    }
+  }, 45000);
+  
+  log('✅ Inactivity checker initialized');
+}
+
+// ========================================
+// END OF FILE
+// ========================================
+
+// Add missing implementation for showing wake word indicator
 function showWakeWordIndicator(message) {
   // Create or update indicator
   let indicator = document.querySelector('.wake-indicator');
@@ -1386,16 +1582,14 @@ function showWakeWordIndicator(message) {
   }, 3000);
 }
 
-// Simulate clicking the assistant button
+// Add missing implementation for button simulation
 function simulateAssistantButtonClick() {
-  const voiceToggleBtn = document.getElementById('voiceToggleBtn');
-  if (voiceToggleBtn && !isListeningForVoice) {
+  if (!isListeningForVoice) {
     log('🎙️ Auto-activating assistant');
     toggleVoiceListening();
   }
 }
 
-// Simulate clicking the camera button
 function simulateCameraButtonClick() {
   if (!cameraActive) {
     log('📷 Auto-starting camera');
@@ -1405,11 +1599,15 @@ function simulateCameraButtonClick() {
   }
 }
 
-// Handle scan command
+// Fix implementation for scan command handling
 function handleScanCommand(transcript) {
   // Start camera if needed
   if (!cameraActive) {
     log('📷 Starting camera for scan');
+    if (VOICE_SCRIPTS && VOICE_SCRIPTS.SCANNING_START) {
+      speakText(VOICE_SCRIPTS.SCANNING_START);
+    }
+    
     startCamera().then(() => {
       // Wait for camera to initialize
       setTimeout(() => {
@@ -1418,6 +1616,11 @@ function handleScanCommand(transcript) {
         pushMsg('user', transcript);
         handleVoiceQuery(transcript);
       }, 1500);
+    }).catch(error => {
+      log('Camera error during scan command:', error);
+      if (VOICE_SCRIPTS && VOICE_SCRIPTS.CAMERA_ERROR) {
+        speakText(VOICE_SCRIPTS.CAMERA_ERROR);
+      }
     });
   } else {
     // Camera already active, just do detection
@@ -1427,170 +1630,100 @@ function handleScanCommand(transcript) {
   }
 }
 
-// Start continuous recognition on page load
-document.addEventListener('DOMContentLoaded', () => {
-  // ...existing code...
+// Complete the handleVoiceQuery function
+async function handleVoiceQuery(query) {
+  if (!query || query.trim() === '') return;
   
-  // Start continuous recognition with a short delay
-  setTimeout(() => {
-    initContinuousRecognition();
-  }, 2000);
-});
-
-// Add CSS for voice feedback
-const voiceFeedbackStyle = document.createElement('style');
-voiceFeedbackStyle.textContent = `
-.wake-indicator {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.95) 0%, rgba(124, 58, 237, 0.95) 100%);
-  color: white;
-  padding: 12px 24px;
-  border-radius: 12px;
-  z-index: 9999;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
-  transition: opacity 0.3s ease;
-}
-.wake-pulse {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: white;
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-`;
-document.head.appendChild(voiceFeedbackStyle);
-
-// Add command helper display
-function showCommandHelper() {
-  const helper = document.createElement('div');
-  helper.className = 'command-helper';
-  helper.innerHTML = `
-    <h3>Available Voice Commands</h3>
-    <div class="command-section">
-      <h4>Wake Assistant:</h4>
-      <ul>${VOICE_COMMANDS.ASSISTANT_WAKE_WORDS.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
-    </div>
-    <div class="command-section">
-      <h4>Start Camera:</h4>
-      <ul>${VOICE_COMMANDS.CAMERA_ACTIVATION.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
-    </div>
-    <div class="command-section">
-      <h4>Scan Item:</h4>
-      <ul>${VOICE_COMMANDS.SCAN_COMMANDS.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
-    </div>
-    <button class="close-helper">✕</button>
-  `;
+  log('💬 Processing query:', query);
   
-  helper.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-    max-width: 300px;
-    z-index: 9999;
-    font-family: 'Inter', sans-serif;
-  `;
-  
-  const closeBtn = helper.querySelector('.close-helper');
-  closeBtn.style.cssText = `
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: none;
-    border: none;
-    font-size: 16px;
-    cursor: pointer;
-    color: #888;
-  `;
-  
-  closeBtn.addEventListener('click', () => {
-    helper.remove();
-  });
-  
-  document.body.appendChild(helper);
-  
-  // Auto-hide after 20 seconds
-  setTimeout(() => {
-    if (document.body.contains(helper)) {
-      helper.style.opacity = '0';
-      helper.style.transform = 'translateY(20px)';
-      helper.style.transition = 'opacity 0.3s, transform 0.3s';
-      setTimeout(() => helper.remove(), 300);
-    }
-  }, 20000);
-}
-
-// Show command helper after a short delay
-setTimeout(showCommandHelper, 5000);
-
-// ========================================
-// FINAL TOUCHES
-// ========================================
-
-// Minor UI/UX improvements
-document.addEventListener('DOMContentLoaded', () => {
-  // Smooth scroll to top for long pages
-  const scrollToTopBtn = document.getElementById('scrollToTop');
-  if (scrollToTopBtn) {
-    scrollToTopBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+  try {
+    // Show thinking indicator
+    pushMsg('bot', '💭 Thinking...');
+    
+    // Gather context about the current product being viewed (if any)
+    const foodContext = {
+      product: {
+        name: document.getElementById('productName')?.textContent || null,
+        brand: document.getElementById('productBrand')?.textContent || null,
+        quantity: document.getElementById('productQuantity')?.textContent || null
+      },
+      nutrition: {
+        calories: document.getElementById('calorieValue')?.textContent || null,
+        carbs: document.getElementById('carbValue')?.textContent?.replace('g', '') || null,
+        protein: document.getElementById('proteinValue')?.textContent?.replace('g', '') || null,
+        fat: document.getElementById('fatValue')?.textContent?.replace('g', '') || null,
+        sugars: document.getElementById('sugarValue')?.textContent?.replace('g', '') || null,
+        sodium: document.getElementById('sodiumValue')?.textContent?.replace('mg', '') || null,
+        fiber: document.getElementById('fiberValue')?.textContent?.replace('g', '') || null
+      }
+    };
+    
+    // Send the query to the backend with context
+    const response = await fetch(`${API_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: query,
+        foodContext: foodContext,
+        mode: currentMode,
+        language: currentLanguage
+      })
     });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    
+    // Remove thinking indicator
+    const thinkingMsg = chatWindow.querySelector('.msg.bot:last-child');
+    if (thinkingMsg && thinkingMsg.querySelector('.bubble').textContent.includes('💭 Thinking')) {
+      thinkingMsg.remove();
+    }
+    
+    // Update session state
+    sessionState.lastInteractionTime = Date.now();
+    
+    // Display and speak the response
+    if (result.response) {
+      pushMsg('bot', result.response);
+      speakText(result.response);
+      
+      // Process any actions returned by the backend
+      if (result.actions) {
+        processResponseActions(result.actions);
+      }
+    } else {
+      throw new Error('Empty response from backend');
+    }
+    
+  } catch (error) {
+    console.error('❌ Voice query error:', error);
+    
+    // Remove thinking indicator
+    const thinkingMsg = chatWindow.querySelector('.msg.bot:last-child');
+    if (thinkingMsg && thinkingMsg.querySelector('.bubble').textContent.includes('💭 Thinking')) {
+      thinkingMsg.remove();
+    }
+    
+    // Show error message
+    const errorMsg = "Sorry, I had trouble processing that request. Please try again.";
+    pushMsg('bot', errorMsg);
+    speakText(errorMsg);
+  }
+}
+
+// Add the helper function to process actions
+function processResponseActions(actions) {
+  if (!actions) return;
+  
+  // Handle different types of actions
+  if (actions.switchMode && actions.switchMode in modeConfig) {
+    switchMode(actions.switchMode);
+    log(`🔄 Switched to ${actions.switchMode} mode based on voice command`);
   }
   
-  // Tooltips for buttons
-  const tooltips = {
-    'startCamera': 'Start or stop the camera',
-    'toggleFoodInfo': 'Show or hide food information',
-    'emergencyBtn': 'Activate emergency mode',
-    'closeEmergencyBtn': 'Close emergency overlay',
-    'cancelEmergencyBtn': 'Cancel emergency actions',
-    'languageSelect': 'Select language for responses'
-  };
-  
-  Object.keys(tooltips).forEach(id => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.setAttribute('title', tooltips[id]);
-      element.classList.add('has-tooltip');
-    }
-  });
-});
-
-// Accessibility enhancements
-document.addEventListener('DOMContentLoaded', () => {
-  // ARIA roles and properties
-  const setAria = (id, role, props) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.setAttribute('role', role);
-      Object.entries(props).forEach(([key, value]) => {
-        element.setAttribute(`aria-${key}`, value);
-      });
-    }
-  };
-  
-  setAria('video', 'region', { label: 'Camera feed' });
-  setAria('canvas', 'img', { label: 'Nutritional analysis result' });
-  setAria('chatWindow', 'log', { label: 'Chat messages' });
-  setAria('foodInfoContainer', 'region', { label: 'Food information' });
-  setAria('emergencyOverlay', 'dialog', { label: 'Emergency actions' });
-});
-
-// Log final initialization
-log('A-eye fully initialized with voice command automation');
+  if (actions.showElement) {
+  const element = document.getElementById(actions.showElement);
+  if
