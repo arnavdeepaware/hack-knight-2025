@@ -15,6 +15,7 @@ const emergencyOverlay = document.getElementById('emergencyOverlay');
 const closeEmergencyBtn = document.getElementById('closeEmergencyBtn');
 const cancelEmergencyBtn = document.getElementById('cancelEmergencyBtn');
 const emergencyVideo = document.getElementById('emergencyVideo');
+const detectingBadge = document.getElementById('detectingBadge');
 
 // State
 let cameraActive = false;
@@ -49,6 +50,14 @@ const modeConfig = {
     ]
   }
 };
+
+// API Configuration
+const API_BASE_URL = 'http://localhost:3001/api';
+
+// Detection state
+let isDetecting = false;
+let lastDetectionTime = 0;
+const DETECTION_INTERVAL = 3000; // Analyze every 3 seconds
 
 // Helpers
 function log(...args) { 
@@ -321,12 +330,140 @@ function drawVideoFrame() {
   if (!cameraActive || !ctx || !video) return;
   
   try {
+    // Draw current frame
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Periodic detection (non-blocking)
+    detectFoodProduct();
+    
   } catch(e) {
     console.warn('drawImage failed:', e);
   }
   
   drawLoopId = requestAnimationFrame(drawVideoFrame);
+}
+
+// Function to send frame to backend for detection
+async function detectFoodProduct() {
+  if (!cameraActive || !canvas || isDetecting) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastDetectionTime < DETECTION_INTERVAL) {
+    return; // Too soon since last detection
+  }
+
+  isDetecting = true;
+  lastDetectionTime = now;
+
+  // Show detecting indicator
+  if (detectingBadge) {
+    detectingBadge.classList.add('active');
+  }
+
+  try {
+    // Get current frame as base64
+    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    
+    log('📤 Sending frame to backend for detection...');
+
+    // Send to backend
+    const response = await fetch(`${API_BASE_URL}/detect`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        image: imageData,
+        mode: currentMode
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    
+    log('📥 Detection result:', result);
+
+    if (result.detected && result.product) {
+      // Update UI with detected product
+      updateFoodInfoFromDetection(result);
+      
+      // Add to chat
+      pushMsg('bot', result.message || `I detected ${result.product.name}. Here's the nutrition info.`);
+    } else {
+      log('ℹ️ No food product detected in frame');
+      // Optionally notify user after several failed attempts
+    }
+
+  } catch (error) {
+    console.error('❌ Detection error:', error);
+    // Don't spam user with errors, just log them
+  } finally {
+    isDetecting = false;
+    
+    // Hide detecting indicator
+    if (detectingBadge) {
+      detectingBadge.classList.remove('active');
+    }
+  }
+}
+
+// Update food info UI from detection result
+function updateFoodInfoFromDetection(result) {
+  const { product, nutrition, ingredients } = result;
+
+  // Update product header
+  if (product.name) {
+    document.getElementById('productName').textContent = product.name;
+  }
+  if (product.brand) {
+    document.getElementById('productBrand').textContent = product.brand;
+  }
+  if (product.quantity) {
+    document.getElementById('productQuantity').textContent = product.quantity;
+  }
+
+  // Update nutrition values
+  if (nutrition) {
+    if (nutrition.calories !== null) {
+      document.getElementById('calorieValue').textContent = nutrition.calories;
+    }
+    if (nutrition.carbs !== null) {
+      document.getElementById('carbValue').textContent = `${nutrition.carbs}g`;
+    }
+    if (nutrition.protein !== null) {
+      document.getElementById('proteinValue').textContent = `${nutrition.protein}g`;
+    }
+    if (nutrition.fat !== null) {
+      document.getElementById('fatValue').textContent = `${nutrition.fat}g`;
+    }
+    if (nutrition.sugars !== null) {
+      document.getElementById('sugarValue').textContent = `${nutrition.sugars}g`;
+    }
+    if (nutrition.sodium !== null) {
+      document.getElementById('sodiumValue').textContent = `${nutrition.sodium}mg`;
+    }
+    if (nutrition.fiber !== null) {
+      document.getElementById('fiberValue').textContent = `${nutrition.fiber}g`;
+    }
+  }
+
+  // Update ingredients
+  if (ingredients && ingredients.length > 0) {
+    const tagsContainer = document.getElementById('ingredientsTags');
+    if (tagsContainer) {
+      tagsContainer.innerHTML = ingredients
+        .slice(0, 5)
+        .map(ing => `<span class="ingredient-tag">${ing}</span>`)
+        .join('');
+    }
+  }
+
+  log('✅ UI updated with detection results');
 }
 
 // Event listeners for camera controls
