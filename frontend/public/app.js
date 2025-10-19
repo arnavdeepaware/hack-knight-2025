@@ -1725,5 +1725,22 @@ function processResponseActions(actions) {
   }
   
   if (actions.showElement) {
-  const element = document.getElementById(actions.showElement);
-  if
+    const element = document.getElementById(actions.showElement);
+    if (element) {
+      element.style.display = 'block';
+      log(`📌 Showed element: ${actions.showElement}`);
+    } else {
+      log(`⚠️ Could not find element: ${actions.showElement}`);
+    }
+  }
+  
+  if (actions.hideElement) {
+    const element = document.getElementById(actions.hideElement);
+    if (element) {
+      element.style.display = 'none';
+      log(`🙈 Hid element: ${actions.hideElement}`);
+    } else {
+      log(`⚠️ Could not find element: ${actions.hideElement}`);
+    }
+  }
+}
