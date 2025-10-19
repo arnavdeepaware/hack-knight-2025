@@ -1,0 +1,16 @@
+# AI & API Libraries
+google-generativeai>=0.3.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Audio Processing
+numpy>=1.24.0
+sounddevice>=0.4.6
+soundfile>=0.12.1
+SpeechRecognition>=3.10.0
+
+# Audio Playback
+playsound==1.2.2
+
+# Additional dependencies (if needed)
+pyaudio>=0.2.13

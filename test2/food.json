@@ -1,0 +1,68 @@
+{
+  "food_item": {
+    "name": "Protein Bar - Peanut Crunch",
+    "brand": "NutriMax",
+    "quantity": "60g",
+    "category": "Snack Bar"
+  },
+  "nutrition_facts": {
+    "serving_size": "1 bar (60g)",
+    "calories": 250,
+    "total_fat": {
+      "value": "12g",
+      "percent_daily_value": "15%"
+    },
+    "saturated_fat": {
+      "value": "3g",
+      "percent_daily_value": "15%"
+    },
+    "trans_fat": {
+      "value": "0g"
+    },
+    "cholesterol": {
+      "value": "5mg",
+      "percent_daily_value": "2%"
+    },
+    "sodium": {
+      "value": "180mg",
+      "percent_daily_value": "8%"
+    },
+    "total_carbohydrates": {
+      "value": "23g",
+      "percent_daily_value": "8%"
+    },
+    "dietary_fiber": {
+      "value": "4g",
+      "percent_daily_value": "14%"
+    },
+    "total_sugars": {
+      "value": "10g",
+      "includes_added_sugars": {
+        "value": "8g",
+        "percent_daily_value": "16%"
+      }
+    },
+    "protein": {
+      "value": "20g",
+      "percent_daily_value": "40%"
+    },
+    "vitamin_d": {
+      "value": "0mcg",
+      "percent_daily_value": "0%"
+    },
+    "calcium": {
+      "value": "100mg",
+      "percent_daily_value": "8%"
+    },
+    "iron": {
+      "value": "2mg",
+      "percent_daily_value": "10%"
+    },
+    "potassium": {
+      "value": "250mg",
+      "percent_daily_value": "6%"
+    }
+  },
+  "allergens": ["Peanuts", "Soy", "Milk"],
+  "barcode": "0891234567892"
+}

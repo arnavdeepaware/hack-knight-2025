@@ -222,6 +222,35 @@
             </div>
             <span class="status-text">🎤 Voice-only • Listening...</span>
           </div>
+
+          <!-- ADD THIS: Voice control button -->
+          <div class="voice-controls" style="display: flex; gap: 12px; margin-top: 16px;">
+            <button class="btn-voice-toggle" id="voiceToggleBtn" style="
+              flex: 1;
+              background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+              border: none;
+              color: white;
+              padding: 16px;
+              border-radius: 12px;
+              font-size: 15px;
+              font-weight: 700;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 12px;
+              transition: all 0.2s;
+              box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+              font-family: 'Inter', sans-serif;
+            ">
+              <svg width="22" height="22" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M12 3a4 4 0 0 0-4 4v5a4 4 0 0 0 8 0V7a4 4 0 0 0-4-4Z"/>
+                <path fill="currentColor" d="M6 11a6 6 0 0 0 12 0h2a8 8 0 0 1-16 0h2Z" opacity="0.7"/>
+              </svg>
+              <span>Click to Talk</span>
+            </button>
+          </div>
+
         </div>
       </div>
 
