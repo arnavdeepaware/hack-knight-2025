@@ -549,6 +549,269 @@ app.get('/api/rate-limit-status', (req, res) => {
   res.json(status);
 });
 
+// ✅ ELEVENLABS TTS CONFIGURATION - Fixed API Key Reading
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_LABS_API_KEY || '';
+
+// Log API key status (without revealing the key)
+console.log('🔑 ElevenLabs API Key Status:', ELEVENLABS_API_KEY ? 
+  `Loaded (${ELEVENLABS_API_KEY.substring(0, 6)}...${ELEVENLABS_API_KEY.substring(ELEVENLABS_API_KEY.length - 4)})` : 
+  '❌ NOT FOUND');
+
+const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
+
+// Available voices (sponsor showcase!)
+const ELEVENLABS_VOICES = {
+  scarlet: 'j7KV53NgP8U4LRS2k2Gs',    // Scarlet - bold, dynamic (DEFAULT for hackathon)
+  rachel: '21m00Tcm4TlvDq8ikWAM',    // Rachel - warm, friendly
+  bella: 'EXAVITQu4vr4xnSDxMaL',     // Bella - confident, expressive
+  antoni: 'ErXwobaYiN019PkySvjV',    // Antoni - well-rounded male
+  elli: 'MF3mGyEYCl7XYWbV9V6O',      // Elli - emotional, young female
+  josh: 'TxGEqnHWrfWFTfGW9XjX',      // Josh - deep, resonant male
+  arnold: 'VR6AewLTigWG4xSOukaG',    // Arnold - crisp, articulate male
+  adam: 'pNInz6obpgDQGcFmaJgB',      // Adam - deep, narrative male
+  sam: 'yoZ06aMxZJJ28mfd3POQ'        // Sam - dynamic, raspy male
+};
+
+// ✅ ELEVENLABS VOICE PROFILES - Preset configurations for different use cases
+const VOICE_PROFILES = {
+  // Default: Balanced and natural
+  default: {
+    stability: 0.5,
+    similarity_boost: 0.75,
+    style: 0.5,
+    use_speaker_boost: true
+  },
+  
+  // Clear and stable - Best for important information (allergens, warnings)
+  clear: {
+    stability: 0.8,        // More consistent
+    similarity_boost: 0.9, // Very accurate to voice
+    style: 0.3,            // Less dramatic
+    use_speaker_boost: true
+  },
+  
+  // Expressive and dynamic - Best for conversational responses
+  expressive: {
+    stability: 0.3,        // More varied
+    similarity_boost: 0.6, // Some variance allowed
+    style: 0.8,            // More dramatic
+    use_speaker_boost: true
+  },
+  
+  // Fast and efficient - Best for quick facts
+  fast: {
+    stability: 0.7,        // Fairly stable
+    similarity_boost: 0.8,
+    style: 0.4,            // Neutral
+    use_speaker_boost: true
+  },
+  
+  // Calm and soothing - Best for long descriptions
+  calm: {
+    stability: 0.9,        // Very consistent
+    similarity_boost: 0.85,
+    style: 0.2,            // Minimal drama
+    use_speaker_boost: true
+  },
+  
+  // Energetic - Best for exciting announcements
+  energetic: {
+    stability: 0.2,        // Very varied
+    similarity_boost: 0.5,
+    style: 1.0,            // Maximum drama
+    use_speaker_boost: true
+  }
+};
+
+// POST /api/text-to-speech - Convert text to speech using ElevenLabs
+app.post('/api/text-to-speech', async (req, res) => {
+  try {
+    const { text, voiceId = 'scarlet', speed = 1.15, profile = 'default' } = req.body;
+    
+    if (!text || !text.trim()) {
+      return res.status(400).json({
+        error: 'No text provided'
+      });
+    }
+    
+    // ✅ Enhanced API key validation with detailed logging
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🎤 TTS Request Received');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('Text:', text.substring(0, 50) + '...');
+    console.log('Voice:', voiceId);
+    console.log('API Key Status:', ELEVENLABS_API_KEY ? '✅ Present' : '❌ Missing');
+    console.log('API Key Length:', ELEVENLABS_API_KEY ? ELEVENLABS_API_KEY.length : 0);
+    console.log('API Key Preview:', ELEVENLABS_API_KEY ? 
+      `${ELEVENLABS_API_KEY.substring(0, 10)}...${ELEVENLABS_API_KEY.slice(-8)}` : 'N/A');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
+    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.length < 20 || !ELEVENLABS_API_KEY.startsWith('sk_')) {
+      console.error('⚠️ ElevenLabs API key is invalid or not configured');
+      console.error('Expected format: sk_xxxxxxxxxxxxxxxxxxxxxxxx');
+      console.error('Actual format:', ELEVENLABS_API_KEY ? `${ELEVENLABS_API_KEY.substring(0, 15)}...` : 'EMPTY');
+      
+      return res.status(500).json({
+        error: 'Text-to-speech service not configured',
+        fallback: true,
+        debug: {
+          hasKey: !!ELEVENLABS_API_KEY,
+          keyLength: ELEVENLABS_API_KEY ? ELEVENLABS_API_KEY.length : 0,
+          keyFormat: ELEVENLABS_API_KEY ? 'Invalid format' : 'Missing'
+        }
+      });
+    }
+    
+    // Get voice ID from name or use directly if already an ID
+    const selectedVoiceId = ELEVENLABS_VOICES[voiceId] || ELEVENLABS_VOICES.scarlet;
+    
+    // ✅ Get voice settings from profile (or use custom if provided in request)
+    const voiceSettings = req.body.voice_settings || VOICE_PROFILES[profile] || VOICE_PROFILES.default;
+    
+    console.log(`📡 Calling ElevenLabs API...`);
+    console.log(`   Voice ID: ${selectedVoiceId}`);
+    console.log(`   Profile: ${profile}`);
+    console.log(`   Settings:`, voiceSettings);
+    
+    // ✅ Call ElevenLabs API with customizable voice settings
+    const response = await fetch(`${ELEVENLABS_API_URL}/${selectedVoiceId}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_monolingual_v1',
+        voice_settings: voiceSettings  // ✅ Use dynamic settings
+      })
+    });
+    
+    // ✅ Enhanced error response handling
+    if (!response.ok) {
+      let errorText = 'Unknown error';
+      let errorDetails = {};
+      
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.detail?.message || errorJson.message || JSON.stringify(errorJson);
+        errorDetails = errorJson;
+      } catch {
+        errorText = await response.text();
+      }
+      
+      console.error('\n❌ ElevenLabs API Error');
+      console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error('Status:', response.status);
+      console.error('Status Text:', response.statusText);
+      console.error('Error:', errorText);
+      console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      
+      // Check if it's specifically an auth error
+      if (response.status === 401) {
+        console.error('🔐 AUTHENTICATION FAILED!');
+        console.error('👉 Your API key is invalid, expired, or revoked');
+        console.error('👉 Go to: https://elevenlabs.io/app/settings/api-keys');
+        console.error('👉 Create a new API key and update your .env file\n');
+      }
+      
+      return res.status(response.status).json({
+        error: 'Text-to-speech service error',
+        details: errorText,
+        fallback: true,
+        debug: {
+          status: response.status,
+          statusText: response.statusText,
+          voiceId: selectedVoiceId,
+          textLength: text.length,
+          errorDetails: errorDetails
+        }
+      });
+    }
+    
+    // Get audio data
+    const audioBuffer = await response.arrayBuffer();
+    const audioBase64 = Buffer.from(audioBuffer).toString('base64');
+    
+    console.log(`✅ TTS Success: Generated ${audioBuffer.byteLength} bytes of audio\n`);
+    
+    // Send back as base64 (easier for frontend)
+    res.json({
+      success: true,
+      audio: audioBase64,
+      voiceId: voiceId,
+      textLength: text.length
+    });
+    
+  } catch (error) {
+    console.error('\n❌ TTS Fatal Error');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('Message:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
+    res.status(500).json({
+      error: 'Failed to generate speech',
+      details: error.message,
+      fallback: true
+    });
+  }
+});
+
+// GET /api/voices - List available ElevenLabs voices
+app.get('/api/voices', (req, res) => {
+  res.json({
+    voices: Object.keys(ELEVENLABS_VOICES).map(name => ({
+      id: name,
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      elevenLabsId: ELEVENLABS_VOICES[name],
+      description: getVoiceDescription(name)
+    })),
+    default: 'scarlet' // ✅ Changed from 'rachel' to 'scarlet'
+  });
+});
+
+function getVoiceDescription(voiceName) {
+  const descriptions = {
+    scarlet: 'Bold, dynamic female voice (RECOMMENDED for demos)', // ✅ NEW
+    rachel: 'Warm, friendly female voice (great for accessibility)',
+    bella: 'Confident, expressive female voice',
+    antoni: 'Well-rounded, versatile male voice',
+    elli: 'Emotional, young female voice',
+    josh: 'Deep, resonant male voice',
+    arnold: 'Crisp, articulate male voice',
+    adam: 'Deep narrative male voice',
+    sam: 'Dynamic, raspy male voice'
+  };
+  return descriptions[voiceName] || 'Professional AI voice';
+}
+
+// GET /api/voice-profiles - List available voice profiles
+app.get('/api/voice-profiles', (req, res) => {
+  res.json({
+    profiles: Object.keys(VOICE_PROFILES).map(name => ({
+      id: name,
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      settings: VOICE_PROFILES[name],
+      description: getProfileDescription(name)
+    })),
+    default: 'default'
+  });
+});
+
+function getProfileDescription(profileName) {
+  const descriptions = {
+    default: 'Balanced and natural - good for general use',
+    clear: 'Clear and stable - best for important information',
+    expressive: 'Expressive and dynamic - best for conversation',
+    fast: 'Fast and efficient - best for quick facts',
+    calm: 'Calm and soothing - best for long descriptions',
+    energetic: 'Energetic and exciting - best for announcements'
+  };
+  return descriptions[profileName] || 'Custom voice profile';
+}
+
 // Start server
 app.listen(PORT, () => {
   console.log('\n🚀 ================================');
