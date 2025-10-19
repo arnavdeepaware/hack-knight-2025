@@ -57,7 +57,10 @@ const API_BASE_URL = 'http://localhost:3001/api';
 // Detection state
 let isDetecting = false;
 let lastDetectionTime = 0;
-const DETECTION_INTERVAL = 3000; // Analyze every 3 seconds
+const DETECTION_INTERVAL = 5000; // ✅ Increase from 3000ms to 5000ms (5 seconds)
+
+// Rate limit handling
+let rateLimitWarningShown = false;
 
 // Helpers
 function log(...args) { 
@@ -351,24 +354,21 @@ async function detectFoodProduct() {
 
   const now = Date.now();
   if (now - lastDetectionTime < DETECTION_INTERVAL) {
-    return; // Too soon since last detection
+    return;
   }
 
   isDetecting = true;
   lastDetectionTime = now;
 
-  // Show detecting indicator
   if (detectingBadge) {
     detectingBadge.classList.add('active');
   }
 
   try {
-    // Get current frame as base64
     const imageData = canvas.toDataURL('image/jpeg', 0.8);
     
     log('📤 Sending frame to backend for detection...');
 
-    // Send to backend
     const response = await fetch(`${API_BASE_URL}/detect`, {
       method: 'POST',
       headers: {
@@ -380,6 +380,22 @@ async function detectFoodProduct() {
       })
     });
 
+    // ✅ Handle rate limiting
+    if (response.status === 429) {
+      const errorData = await response.json();
+      console.warn(`⏱️ Rate limit exceeded: ${errorData.error}`);
+      
+      if (!rateLimitWarningShown) {
+        rateLimitWarningShown = true;
+        pushMsg('bot', `⏱️ Slowing down detection to avoid rate limits. Detection paused for ${errorData.retryAfter} seconds.`);
+        
+        // Reset warning after 5 minutes
+        setTimeout(() => { rateLimitWarningShown = false; }, 300000);
+      }
+      
+      return;
+    }
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -389,23 +405,17 @@ async function detectFoodProduct() {
     log('📥 Detection result:', result);
 
     if (result.detected && result.product) {
-      // Update UI with detected product
       updateFoodInfoFromDetection(result);
-      
-      // Add to chat
       pushMsg('bot', result.message || `I detected ${result.product.name}. Here's the nutrition info.`);
     } else {
       log('ℹ️ No food product detected in frame');
-      // Optionally notify user after several failed attempts
     }
 
   } catch (error) {
     console.error('❌ Detection error:', error);
-    // Don't spam user with errors, just log them
   } finally {
     isDetecting = false;
     
-    // Hide detecting indicator
     if (detectingBadge) {
       detectingBadge.classList.remove('active');
     }
@@ -414,7 +424,7 @@ async function detectFoodProduct() {
 
 // Update food info UI from detection result
 function updateFoodInfoFromDetection(result) {
-  const { product, nutrition, ingredients } = result;
+  const { product, nutrition, ingredients, allergens, warnings } = result;
 
   // Update product header
   if (product.name) {
@@ -461,6 +471,33 @@ function updateFoodInfoFromDetection(result) {
         .map(ing => `<span class="ingredient-tag">${ing}</span>`)
         .join('');
     }
+  }
+
+  // ✅ NEW: Display allergen warnings prominently
+  if (allergens && allergens.length > 0) {
+    const allergenSection = document.createElement('div');
+    allergenSection.className = 'allergen-warning';
+    allergenSection.innerHTML = `
+      <div class="alert-header">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+        </svg>
+        <strong>ALLERGEN WARNING</strong>
+      </div>
+      <div class="allergen-list">
+        ${allergens.map(allergen => `<span class="allergen-tag-warning">${allergen}</span>`).join('')}
+      </div>
+    `;
+    
+    // Insert before ingredients
+    const foodCard = document.querySelector('.food-info-card');
+    const ingredientsSection = document.querySelector('.ingredients-section');
+    if (foodCard && ingredientsSection) {
+      foodCard.insertBefore(allergenSection, ingredientsSection);
+    }
+    
+    // Voice alert for allergens
+    speakText(`Warning: This product contains ${allergens.join(', ')}`);
   }
 
   log('✅ UI updated with detection results');
@@ -690,16 +727,15 @@ log('Canvas element:', canvas ? 'Found' : 'Not found');
 log('Start button:', startCameraBtn ? 'Found' : 'Not found');
 
 // ========================================
-// NEW: Voice Recognition Features
+// VOICE RECOGNITION FEATURES (UNIFIED)
 // ========================================
 
 // Voice state
 let isListeningForVoice = false;
 let speechRecognition = null;
 
-// Initialize Web Speech API (browser built-in)
+// Initialize Web Speech API (browser built-in) - SINGLE IMPLEMENTATION
 function initVoiceRecognition() {
-  // Check if browser supports speech recognition
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   
   if (!SpeechRecognition) {
@@ -708,28 +744,14 @@ function initVoiceRecognition() {
   }
   
   speechRecognition = new SpeechRecognition();
-  speechRecognition.continuous = false; // Stop after one phrase
-  speechRecognition.interimResults = false; // Only final results
+  speechRecognition.continuous = false;
+  speechRecognition.interimResults = false;
   speechRecognition.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
   
-  // When speech is detected
-  speechRecognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    log('📝 You said:', transcript);
-    
-    // Display in chat
-    pushMsg('user', transcript);
-    
-    // Get AI response (we'll implement this in step 4)
-    handleVoiceQuery(transcript);
-  };
-  
-  // When speech recognition starts
   speechRecognition.onstart = () => {
     isListeningForVoice = true;
     log('🎤 Listening for speech...');
     
-    // Update button appearance
     const btn = document.getElementById('voiceToggleBtn');
     if (btn) {
       btn.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
@@ -737,26 +759,32 @@ function initVoiceRecognition() {
     }
   };
   
-  // When speech recognition ends
-  speechRecognition.onend = () => {
-    isListeningForVoice = false;
-    log('🔇 Stopped listening');
-    
-    // Reset button appearance
-    const btn = document.getElementById('voiceToggleBtn');
-    if (btn) {
-      btn.style.background = 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)';
-      btn.querySelector('span').textContent = 'Click to Talk';
-    }
+  speechRecognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    log('📝 You said:', transcript);
+    pushMsg('user', transcript);
+    handleVoiceQuery(transcript);
   };
   
-  // Handle errors
   speechRecognition.onerror = (event) => {
     console.error('Speech recognition error:', event.error);
     isListeningForVoice = false;
     
     if (event.error === 'not-allowed') {
       alert('Microphone permission denied. Please allow microphone access in your browser settings.');
+    } else if (event.error === 'no-speech') {
+      pushMsg('bot', "I didn't hear anything. Please try again.");
+    }
+  };
+  
+  speechRecognition.onend = () => {
+    isListeningForVoice = false;
+    log('🔇 Stopped listening');
+    
+    const btn = document.getElementById('voiceToggleBtn');
+    if (btn) {
+      btn.style.background = 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)';
+      btn.querySelector('span').textContent = 'Click to Talk';
     }
   };
   
@@ -775,35 +803,27 @@ function toggleVoiceListening() {
   }
   
   if (isListeningForVoice) {
-    // Stop listening
     speechRecognition.stop();
   } else {
-    // Start listening
     try {
       speechRecognition.start();
     } catch (error) {
       console.error('Error starting speech recognition:', error);
-      
-      // If already started, stop and restart
       if (error.message.includes('already started')) {
         speechRecognition.stop();
-        setTimeout(() => {
-          speechRecognition.start();
-        }, 100);
+        setTimeout(() => speechRecognition.start(), 100);
       }
     }
   }
 }
 
-// Handle voice query (placeholder for now)
+// Handle voice query - connect to backend
 async function handleVoiceQuery(query) {
   log('💬 Processing query:', query);
   
   try {
-    // Show thinking indicator
     pushMsg('bot', '💭 Thinking...');
     
-    // Get current food context from the last detection
     const foodContext = {
       product: {
         name: document.getElementById('productName')?.textContent || null,
@@ -814,115 +834,94 @@ async function handleVoiceQuery(query) {
         calories: document.getElementById('calorieValue')?.textContent || null,
         carbs: document.getElementById('carbValue')?.textContent.replace('g', '') || null,
         protein: document.getElementById('proteinValue')?.textContent.replace('g', '') || null,
-        fat: document.getElementById('fatValue')?.textContent.replace('g', '') || null
+        fat: document.getElementById('fatValue')?.textContent.replace('g', '') || null,
+        sugars: document.getElementById('sugarValue')?.textContent.replace('g', '') || null,
+        sodium: document.getElementById('sodiumValue')?.textContent.replace('mg', '') || null
       }
     };
     
-    // Send to backend
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}  log('✅ Voice button listener attached');  voiceToggleBtn.addEventListener('click', toggleVoiceListening);if (voiceToggleBtn) {const voiceToggleBtn = document.getElementById('voiceToggleBtn');// Attach click handler to voice button}  // We'll implement this in step 3  log('🔊 Would speak:', text);function speakText(text) {// Placeholder for text-to-speech (step 3)}  }    speakText(errorMsg);    pushMsg('bot', errorMsg);    const errorMsg = 'Sorry, I had trouble processing that. Could you try again?';        }      thinkingMsg.remove();    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {    const thinkingMsg = chatWindow.lastElementChild;    // Remove thinking indicator        console.error('❌ Voice query error:', error);  } catch (error) {        speakText(aiResponse);    pushMsg('bot', aiResponse);    const aiResponse = result.response;    // Display and speak response        }      thinkingMsg.remove();    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {    const thinkingMsg = chatWindow.lastElementChild;    // Remove thinking indicator        const result = await response.json();        }      throw new Error(`HTTP ${response.status}`);    if (!response.ok) {        });      })        mode: currentMode        foodContext: foodContext,        message: query,      body: JSON.stringify({      },        'Content-Type': 'application/json'      headers: {
-
-
-
-
-
-
-
-
-// ========================================// END OF FILE// ========================================}  speakText(`You said: ${query}`);  // Speak the response    pushMsg('bot', `You said: "${query}". (This is a placeholder response.)`);  // For now, just echo the query  // TODO: Process the query and generate a response    log('🤖 Handling voice query:', query);function handleVoiceQuery(query) {// Handle voice query (stub for now)}  }    log('⚠️ Speech synthesis not supported');  } else {    log('🔊 Speaking:', text.substring(0, 50) + '...');    window.speechSynthesis.speak(utterance);    // Speak        }      utterance.voice = preferredVoice;    if (preferredVoice) {    );      voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')    const preferredVoice = voices.find(voice =>     const voices = window.speechSynthesis.getVoices();    // Optional: Select a specific voice        utterance.volume = 1.0;    utterance.pitch = 1.0;    utterance.rate = 0.95; // Slightly slower for clarity    utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;    // Configure voice settings        const utterance = new SpeechSynthesisUtterance(text);        window.speechSynthesis.cancel();    // Cancel any ongoing speech  if ('speechSynthesis' in window) {  // Use browser's built-in speech synthesisfunction speakText(text) {// Placeholder for text-to-speech (step 3)}  }    speechRecognition.start();    try {
-      speechRecognition.start();
-    } catch (error) {
-      console.error('Error starting speech recognition:', error);
-      
-      // If already started, stop and restart
-      if (error.message.includes('already started')) {
-        speechRecognition.stop();
-        setTimeout(() => {
-          speechRecognition.start();
-        }, 100);
-      }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: query,
+        foodContext: foodContext,
+        mode: currentMode
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
+    
+    const result = await response.json();
+    
+    // Remove thinking indicator
+    const thinkingMsg = chatWindow.lastElementChild;
+    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {
+      thinkingMsg.remove();
+    }
+    
+    // Display and speak response
+    const aiResponse = result.response;
+    pushMsg('bot', aiResponse);
+    speakText(aiResponse);
+    
+  } catch (error) {
+    console.error('❌ Voice query error:', error);
+    
+    const thinkingMsg = chatWindow.lastElementChild;
+    if (thinkingMsg && thinkingMsg.textContent.includes('💭')) {
+      thinkingMsg.remove();
+    }
+    
+    const errorMsg = 'Sorry, I had trouble processing that. Could you try again?';
+    pushMsg('bot', errorMsg);
+    speakText(errorMsg);
   }
 }
 
-// Handle voice query (placeholder for now)
-function handleVoiceQuery(query) {
-  log('💬 Processing query:', query);
-  
-  // For now, just echo back (we'll connect to backend in step 4)
-  const response = `I heard you say: "${query}". Voice AI will be connected in the next step!`;
-  
-  setTimeout(() => {
-    pushMsg('bot', response);
-    speakText(response); // We'll implement this in step 3
-  }, 500);
-}
-
-// Placeholder for text-to-speech (step 3)
+// Text-to-Speech using Web Speech API
 function speakText(text) {
-  log('🔊 Would speak:', text);
-  // We'll implement this in step 3
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
+    utterance.rate = 0.95;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice => 
+      voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')
+    );
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    
+    window.speechSynthesis.speak(utterance);
+    log('🔊 Speaking:', text.substring(0, 50) + '...');
+  } else {
+    log('⚠️ Speech synthesis not supported');
+  }
 }
 
-// Attach click handler to voice button
+// Attach voice button click handler
 const voiceToggleBtn = document.getElementById('voiceToggleBtn');
 if (voiceToggleBtn) {
   voiceToggleBtn.addEventListener('click', toggleVoiceListening);
   log('✅ Voice button listener attached');
+}
+
+// Check browser support
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  log('✅ Speech recognition available');
+} else {
+  log('⚠️ Speech recognition not supported in this browser');
+  if (voiceToggleBtn) {
+    voiceToggleBtn.disabled = true;
+    voiceToggleBtn.style.opacity = '0.5';
+    voiceToggleBtn.title = 'Speech recognition not supported';
+  }
 }
