@@ -727,6 +727,309 @@ log('Canvas element:', canvas ? 'Found' : 'Not found');
 log('Start button:', startCameraBtn ? 'Found' : 'Not found');
 
 // ========================================
+// ELEVENLABS TTS INTEGRATION (COMPLETE)
+// ========================================
+
+// Voice settings
+let currentVoice = 'scarlet';
+let currentProfile = 'default';
+let isSpeaking = false;
+let audioQueue = [];
+let audioContext = null;
+
+// ✅ Initialize audio context (must be triggered by user interaction)
+function initAudioContext() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    log('✅ AudioContext initialized');
+  }
+  
+  // Resume if suspended (Chrome auto-suspends AudioContext)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+}
+
+// ✅ Context-aware voice profile selection
+function getVoiceProfileForContext(text) {
+  const lowerText = text.toLowerCase();
+  
+  // ⚠️ Allergen warnings = Clear and stable
+  if (lowerText.includes('warning') || lowerText.includes('allergen') || lowerText.includes('contains')) {
+    return 'clear';
+  }
+  
+  // 🎉 Exciting news = Energetic
+  if (lowerText.includes('!') && (lowerText.includes('great') || lowerText.includes('perfect') || lowerText.includes('excellent'))) {
+    return 'energetic';
+  }
+  
+  // 📊 Quick facts (calories, numbers) = Fast
+  if (lowerText.match(/\d+/) && (lowerText.includes('calories') || lowerText.includes('gram') || lowerText.includes('serving'))) {
+    return 'fast';
+  }
+  
+  // 💬 Long descriptions = Calm
+  if (text.length > 200) {
+    return 'calm';
+  }
+  
+  // 🗣️ Conversational = Expressive
+  if (lowerText.includes('you') || lowerText.includes('i') || lowerText.includes('?')) {
+    return 'expressive';
+  }
+  
+  // Default
+  return 'default';
+}
+
+// ✅ Text-to-Speech using ElevenLabs API with context-aware profiles
+async function speakText(text, customProfile = null) {
+  if (!text || !text.trim()) {
+    return;
+  }
+  
+  // Add to queue if already speaking
+  if (isSpeaking) {
+    audioQueue.push({ text, profile: customProfile });
+    log('🔊 Added to speech queue:', text.substring(0, 50) + '...');
+    return;
+  }
+  
+  isSpeaking = true;
+  showSpeakingIndicator(true);
+  
+  try {
+    log('🎤 Requesting ElevenLabs TTS...');
+    
+    // ✅ Initialize audio context on first use
+    initAudioContext();
+    
+    // ✅ Auto-select profile based on context if not specified
+    const selectedProfile = customProfile || getVoiceProfileForContext(text);
+    log(`🎛️ Using voice profile: ${selectedProfile}`);
+    
+    // Call backend TTS endpoint
+    const response = await fetch(`${API_BASE_URL}/text-to-speech`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: text,
+        voiceId: currentVoice,
+        profile: selectedProfile,
+        speed: 1.16
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error(`TTS service error: ${response.status}`, errorData);
+      
+      if (response.status === 401) {
+        console.error('🔐 ElevenLabs API key is invalid or not configured');
+        pushMsg('bot', '⚠️ Voice service unavailable. Using browser speech instead.');
+      }
+      
+      throw new Error(`TTS service error: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.fallback) {
+      log('⚠️ Falling back to browser TTS');
+      speakTextBrowser(text);
+      return;
+    }
+    
+    // Convert base64 to audio and play
+    const audioBlob = base64ToBlob(result.audio, 'audio/mpeg');
+    const audioUrl = URL.createObjectURL(audioBlob);
+    
+    // ✅ Use Web Audio API for better control (avoids autoplay issues)
+    try {
+      await playAudioWithWebAudioAPI(audioUrl);
+      log(`🔊 ElevenLabs audio played successfully (${result.textLength} chars, voice: ${result.voiceId}, profile: ${selectedProfile})`);
+    } catch (playError) {
+      console.error('Web Audio API failed, trying HTML5 Audio:', playError);
+      await playAudioWithHTML5(audioUrl);
+    }
+    
+    // Cleanup
+    URL.revokeObjectURL(audioUrl);
+    isSpeaking = false;
+    showSpeakingIndicator(false);
+    
+    // ✅ Process queue with profile awareness
+    if (audioQueue.length > 0) {
+      const nextItem = audioQueue.shift();
+      speakText(nextItem.text, nextItem.profile);
+    }
+    
+  } catch (error) {
+    console.error('❌ ElevenLabs TTS error:', error);
+    isSpeaking = false;
+    showSpeakingIndicator(false);
+    
+    // Fallback to browser TTS
+    speakTextBrowser(text);
+  }
+}
+
+// ✅ Play audio using Web Audio API (better for programmatic playback)
+async function playAudioWithWebAudioAPI(audioUrl) {
+  if (!audioContext) {
+    throw new Error('AudioContext not initialized');
+  }
+  
+  return new Promise(async (resolve, reject) => {
+    try {
+      const response = await fetch(audioUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      
+      source.onended = () => resolve();
+      source.start(0);
+      
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// ✅ Fallback HTML5 Audio with better error handling
+async function playAudioWithHTML5(audioUrl) {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(audioUrl);
+    audio.autoplay = true;
+    audio.muted = false;
+    
+    audio.onended = () => resolve();
+    audio.onerror = (error) => reject(error);
+    
+    audio.play()
+      .then(() => log('🔊 HTML5 Audio playing'))
+      .catch((playError) => {
+        console.error('Autoplay blocked:', playError);
+        
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+          position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+          background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+          color: white; padding: 16px 24px; border-radius: 12px;
+          box-shadow: 0 8px 30px rgba(239, 68, 68, 0.4); z-index: 10000;
+          font-family: 'Inter', sans-serif; font-weight: 600; cursor: pointer;
+          animation: slideDown 0.3s ease;
+        `;
+        notification.textContent = '🔊 Click here to enable audio';
+        
+        notification.addEventListener('click', () => {
+          audio.play()
+            .then(() => { notification.remove(); resolve(); })
+            .catch((err) => {
+              notification.textContent = '❌ Could not play audio';
+              setTimeout(() => notification.remove(), 2000);
+              reject(err);
+            });
+        });
+        
+        document.body.appendChild(notification);
+        setTimeout(() => {
+          if (document.body.contains(notification)) {
+            notification.remove();
+            reject(new Error('User did not enable audio'));
+          }
+        }, 10000);
+      });
+  });
+}
+
+// ✅ Fallback: Browser TTS
+function speakTextBrowser(text) {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
+    utterance.rate = 0.95;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice => 
+      voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')
+    );
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    
+    window.speechSynthesis.speak(utterance);
+    log('🔊 Speaking (browser fallback):', text.substring(0, 50) + '...');
+  } else {
+    log('⚠️ Speech synthesis not supported');
+  }
+}
+
+// ✅ Helper: Convert base64 to Blob
+function base64ToBlob(base64, mimeType) {
+  const byteCharacters = atob(base64);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: mimeType });
+}
+
+// ✅ Show/hide speaking indicator
+function showSpeakingIndicator(show) {
+  const indicator = document.querySelector('.voice-status');
+  if (indicator) {
+    if (show) {
+      indicator.style.background = 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(124, 58, 237, 0.15) 100%)';
+      indicator.style.borderColor = 'rgba(139, 92, 246, 0.4)';
+      
+      const statusText = indicator.querySelector('.status-text');
+      if (statusText) {
+        statusText.textContent = '🔊 Speaking... (ElevenLabs)';
+      }
+    } else {
+      indicator.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%)';
+      indicator.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+      
+      const statusText = indicator.querySelector('.status-text');
+      if (statusText) {
+        statusText.textContent = '🎤 Voice-only • Listening...';
+      }
+    }
+  }
+}
+
+// ✅ Stop speaking (emergency cancel)
+function stopSpeaking() {
+  audioQueue = [];
+  
+  const audios = document.querySelectorAll('audio');
+  audios.forEach(audio => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+  
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+  
+  isSpeaking = false;
+  showSpeakingIndicator(false);
+  log('🛑 Stopped all speech');
+}
+
+// ========================================
 // VOICE RECOGNITION FEATURES (UNIFIED)
 // ========================================
 
@@ -865,7 +1168,7 @@ async function handleVoiceQuery(query) {
     // Display and speak response
     const aiResponse = result.response;
     pushMsg('bot', aiResponse);
-    speakText(aiResponse);
+    speakText(aiResponse);  // ✅ This calls the ElevenLabs version above
     
   } catch (error) {
     console.error('❌ Voice query error:', error);
@@ -877,33 +1180,7 @@ async function handleVoiceQuery(query) {
     
     const errorMsg = 'Sorry, I had trouble processing that. Could you try again?';
     pushMsg('bot', errorMsg);
-    speakText(errorMsg);
-  }
-}
-
-// Text-to-Speech using Web Speech API
-function speakText(text) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = currentLanguage === 'en' ? 'en-US' : currentLanguage;
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(voice => 
-      voice.lang.startsWith(currentLanguage) && voice.name.includes('Female')
-    );
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-    }
-    
-    window.speechSynthesis.speak(utterance);
-    log('🔊 Speaking:', text.substring(0, 50) + '...');
-  } else {
-    log('⚠️ Speech synthesis not supported');
+    speakText(errorMsg);  // ✅ This calls the ElevenLabs version above
   }
 }
 
@@ -925,3 +1202,14 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     voiceToggleBtn.title = 'Speech recognition not supported';
   }
 }
+
+// ✅ Initialize audio on first user interaction
+document.addEventListener('click', () => {
+  initAudioContext();
+}, { once: true });
+
+document.addEventListener('keydown', () => {
+  initAudioContext();
+}, { once: true });
+
+log('✅ ElevenLabs TTS fully configured with context-aware voice profiles');
