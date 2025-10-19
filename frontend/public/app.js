@@ -817,25 +817,51 @@ function simulateEmergencyActions() {
   
   if (!callStatusText || !smsStatusText || !locationStatusText) return;
   
-  // Simulate call
-  setTimeout(() => { callStatusText.textContent = 'Connecting call...'; }, 1000);
-  setTimeout(() => {
+  // ✅ REAL CALL - Place actual Twilio call
+  callStatusText.textContent = 'Placing emergency call...';
+  
+  fetch(`${API_BASE_URL}/emergency/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      reason: 'User activated emergency mode via button'
+    })
+  })
+  .then(response => response.json())
+  .then(result => {
+    if (result.success) {
+      if (callStatus) {
+        callStatus.classList.remove('status-pending');
+        callStatus.classList.add('status-active');
+      }
+      callStatusText.textContent = 'Emergency call placed successfully';
+      log('✅ Emergency call successful:', result.callSid);
+    } else {
+      if (callStatus) {
+        callStatus.classList.remove('status-pending');
+        callStatus.classList.add('status-error');
+      }
+      callStatusText.textContent = `Call failed: ${result.error}`;
+      log('❌ Emergency call failed:', result.error);
+    }
+  })
+  .catch(error => {
+    console.error('Emergency call error:', error);
     if (callStatus) {
       callStatus.classList.remove('status-pending');
-      callStatus.classList.add('status-active');
+      callStatus.classList.add('status-error');
     }
-    callStatusText.textContent = 'Call connected to John Doe';
-  }, 3000);
+    callStatusText.textContent = 'Call failed: Connection error';
+  });
   
-  // Simulate SMS
-  setTimeout(() => { smsStatusText.textContent = 'Sending message with location...'; }, 1500);
+  // SMS - Mark as disabled (calls only feature)
   setTimeout(() => {
+    smsStatusText.textContent = 'SMS feature disabled';
     if (smsStatus) {
       smsStatus.classList.remove('status-pending');
-      smsStatus.classList.add('status-active');
+      smsStatus.classList.add('status-disabled');
     }
-    smsStatusText.textContent = 'Emergency SMS sent successfully';
-  }, 3500);
+  }, 500);
   
   // Simulate location
   setTimeout(() => { locationStatusText.textContent = 'Acquiring GPS coordinates...'; }, 500);
@@ -1777,6 +1803,93 @@ async function handleVoiceQuery(query) {
   // ✅ CHECK FOR SPECIAL COMMANDS FIRST (before sending to chat)
   const lowerQuery = query.toLowerCase().trim();
   
+  // ========================================
+  // EMERGENCY CALL COMMANDS
+  // ========================================
+  if (lowerQuery.includes('call my contact') || lowerQuery.includes('emergency call') || 
+      lowerQuery.includes('call emergency') || lowerQuery.includes('call contact')) {
+    log('🚨 Emergency call command detected');
+    pushMsg('user', query);
+    pushMsg('bot', 'This will call your emergency contact. Say "confirm" to proceed, or "cancel" to abort.');
+    
+    // Set a flag to wait for confirmation
+    window.awaitingEmergencyConfirmation = true;
+    
+    // Auto-restart listening for confirmation
+    setTimeout(() => {
+      if (!isListeningForVoice) {
+        toggleVoiceListening();
+      }
+    }, 1000);
+    return;
+  }
+  
+  // Handle emergency call confirmation
+  if (window.awaitingEmergencyConfirmation) {
+    if (lowerQuery === 'confirm' || lowerQuery.includes('yes') || lowerQuery.includes('proceed')) {
+      window.awaitingEmergencyConfirmation = false;
+      pushMsg('user', query);
+      pushMsg('bot', 'Calling your emergency contact now...');
+      
+      // Place the emergency call
+      try {
+        const response = await fetch(`${API_BASE_URL}/emergency/call`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reason: 'User requested emergency assistance via voice command'
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          pushMsg('bot', 'Emergency call placed successfully. Help is on the way.');
+          speakText('Emergency call placed successfully. Help is on the way.');
+        } else {
+          pushMsg('bot', `Failed to place emergency call: ${result.error}`);
+          speakText(`Sorry, I couldn't place the emergency call. ${result.error}`);
+        }
+      } catch (error) {
+        console.error('Emergency call error:', error);
+        pushMsg('bot', 'Failed to place emergency call. Please check your connection or try the emergency button.');
+        speakText('Sorry, I couldn\'t place the emergency call. Please try the emergency button.');
+      }
+      
+      // Restart listening
+      setTimeout(() => {
+        if (!isListeningForVoice) {
+          toggleVoiceListening();
+        }
+      }, 1000);
+      return;
+    } else if (lowerQuery === 'cancel' || lowerQuery.includes('no') || lowerQuery.includes('abort')) {
+      window.awaitingEmergencyConfirmation = false;
+      pushMsg('user', query);
+      pushMsg('bot', 'Emergency call cancelled.');
+      speakText('Emergency call cancelled.');
+      
+      // Restart listening
+      setTimeout(() => {
+        if (!isListeningForVoice) {
+          toggleVoiceListening();
+        }
+      }, 800);
+      return;
+    }
+    // If they said something else during confirmation, remind them
+    pushMsg('bot', 'Please say "confirm" to place the emergency call, or "cancel" to abort.');
+    setTimeout(() => {
+      if (!isListeningForVoice) {
+        toggleVoiceListening();
+      }
+    }, 1000);
+    return;
+  }
+  
+  // ========================================
+  // CAMERA CONTROL COMMANDS
+  // ========================================
   // Camera control commands - handle locally, don't send to chat
   if (lowerQuery.includes('start camera') || lowerQuery.includes('open camera') || 
       lowerQuery.includes('turn on camera') || lowerQuery.includes('enable camera')) {

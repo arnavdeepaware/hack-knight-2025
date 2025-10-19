@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const twilio = require('twilio');
 require('dotenv').config();
 
 const app = express();
@@ -869,6 +870,95 @@ function getProfileDescription(profileName) {
   return descriptions[profileName] || 'Custom voice profile';
 }
 
+// =============================================================================
+// EMERGENCY CALL ENDPOINT (Twilio Integration)
+// =============================================================================
+
+app.post('/api/emergency/call', async (req, res) => {
+  console.log('\n🚨 ================================');
+  console.log('📞 Emergency call request received');
+  
+  try {
+    // Load Twilio credentials from environment
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_FROM_NUMBER;
+    const toNumber = process.env.AEYE_EMERGENCY_CONTACT;
+    const location = process.env.AEYE_LOCATION || 'Unknown location';
+    
+    // Validate credentials
+    if (!twilioSid || !twilioToken || !fromNumber || !toNumber) {
+      console.error('❌ Missing Twilio credentials in .env file');
+      console.log('   Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, AEYE_EMERGENCY_CONTACT');
+      return res.status(500).json({
+        success: false,
+        error: 'Emergency calling not configured. Please check server configuration.'
+      });
+    }
+    
+    // Validate phone number format (E.164)
+    if (!fromNumber.startsWith('+') || !toNumber.startsWith('+')) {
+      console.error('❌ Phone numbers must be in E.164 format (e.g., +1234567890)');
+      return res.status(500).json({
+        success: false,
+        error: 'Invalid phone number format'
+      });
+    }
+    
+    console.log(`📱 Calling from: ${fromNumber} → ${toNumber}`);
+    console.log(`📍 Location: ${location}`);
+    
+    // Initialize Twilio client
+    const client = twilio(twilioSid, twilioToken);
+    
+    // Get optional reason from request body
+    const reason = req.body?.reason || 'User requested emergency assistance via AEye';
+    
+    // Create TwiML voice message
+    const voiceMessage = `Emergency alert from AEye. ${reason}. Location: ${location}. Please respond immediately.`;
+    
+    // Place the call
+    const call = await client.calls.create({
+      to: toNumber,
+      from: fromNumber,
+      twiml: `<Response><Say voice='alice'>${voiceMessage}</Say></Response>`
+    });
+    
+    console.log(`✅ Emergency call placed successfully`);
+    console.log(`   Call SID: ${call.sid}`);
+    console.log(`   Status: ${call.status}`);
+    console.log('================================\n');
+    
+    return res.json({
+      success: true,
+      message: 'Emergency call placed successfully',
+      callSid: call.sid,
+      status: call.status
+    });
+    
+  } catch (error) {
+    console.error('❌ Emergency call failed:', error.message);
+    console.error('   Error details:', error);
+    console.log('================================\n');
+    
+    // Provide helpful error messages
+    let userMessage = 'Failed to place emergency call';
+    if (error.code === 20003) {
+      userMessage = 'Authentication failed. Please check Twilio credentials.';
+    } else if (error.code === 21210) {
+      userMessage = 'Invalid phone number. The contact number may not be verified.';
+    } else if (error.message.includes('trial')) {
+      userMessage = 'Emergency contact must be verified on Twilio trial account.';
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: userMessage,
+      details: error.message
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log('\n🚀 ================================');
@@ -880,6 +970,7 @@ app.listen(PORT, () => {
   console.log('📋 Available endpoints:');
   console.log(`   POST http://localhost:${PORT}/api/detect - Analyze food product`);
   console.log(`   POST http://localhost:${PORT}/api/chat - Chat with AI assistant`);
+  console.log(`   POST http://localhost:${PORT}/api/emergency/call - Place emergency call (Twilio)`);
   console.log(`   GET  http://localhost:${PORT}/api/health - Health check`);
   console.log(`   GET  http://localhost:${PORT}/api/test-gemini - Test Gemini API`);
   console.log('\n💡 Waiting for detection requests...\n');
