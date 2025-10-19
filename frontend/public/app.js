@@ -1213,3 +1213,384 @@ document.addEventListener('keydown', () => {
 }, { once: true });
 
 log('✅ ElevenLabs TTS fully configured with context-aware voice profiles');
+
+// Voice automation configuration
+const VOICE_COMMANDS = {
+  // Assistant wake words - activates the voice assistant (replaces "Click to Talk")
+  ASSISTANT_WAKE_WORDS: [
+    "hi helper",
+    "vision bot", 
+    "assistant wake up", 
+    "listen to me", 
+    "hey vision"
+  ],
+  
+  // Camera activation commands (replaces "Start Camera" click)
+  CAMERA_ACTIVATION: [
+    "scan now", 
+    "start scanning",
+    "turn on camera", 
+    "camera on", 
+    "start camera"
+  ],
+  
+  // Scan/detection commands that also start the camera if needed
+  SCAN_COMMANDS: [
+    "what is in my hand", 
+    "what am i holding", 
+    "what's in my hand", 
+    "scan this", 
+    "detect this",
+    "what is this product",
+    "what food is this"
+  ],
+  
+  // Mode switching commands
+  FOOD_MODE: ["food mode", "nutrition mode", "switch to food"],
+  CASH_MODE: ["cash mode", "money mode", "switch to cash"]
+};
+
+// Continuous voice recognition for command automation
+let continuousRecognition = null;
+let isListeningForCommands = false;
+
+// Initialize continuous voice recognition to listen for commands
+function initContinuousRecognition() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    log('⚠️ Speech recognition not supported in this browser');
+    return false;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  continuousRecognition = new SpeechRecognition();
+  continuousRecognition.continuous = true;
+  continuousRecognition.interimResults = true;
+  continuousRecognition.lang = 'en-US';
+  
+  continuousRecognition.onstart = () => {
+    isListeningForCommands = true;
+    log('🎧 Continuous command listening active');
+  };
+  
+  continuousRecognition.onresult = (event) => {
+    const result = event.results[event.results.length - 1];
+    
+    // Only process if we have a confident result
+    if (result[0].confidence > 0.6) {
+      const transcript = result[0].transcript.toLowerCase().trim();
+      log('👂 Heard: ' + transcript);
+      
+      // Check for assistant wake words
+      if (VOICE_COMMANDS.ASSISTANT_WAKE_WORDS.some(wake => transcript.includes(wake))) {
+        log('🎙️ Assistant wake word detected: ' + transcript);
+        showWakeWordIndicator("Assistant activated!");
+        simulateAssistantButtonClick();
+      }
+      
+      // Check for camera commands
+      if (VOICE_COMMANDS.CAMERA_ACTIVATION.some(cmd => transcript.includes(cmd))) {
+        log('📷 Camera activation command detected: ' + transcript);
+        showWakeWordIndicator("Starting camera...");
+        simulateCameraButtonClick();
+      }
+      
+      // Check for scan commands (these also start camera if needed)
+      if (VOICE_COMMANDS.SCAN_COMMANDS.some(cmd => transcript.includes(cmd))) {
+        log('🔍 Scan command detected: ' + transcript);
+        handleScanCommand(transcript);
+      }
+      
+      // Check for mode switching
+      if (VOICE_COMMANDS.FOOD_MODE.some(cmd => transcript.includes(cmd))) {
+        log('🥗 Food mode command detected');
+        switchMode('food');
+      }
+      
+      if (VOICE_COMMANDS.CASH_MODE.some(cmd => transcript.includes(cmd))) {
+        log('💵 Cash mode command detected');
+        switchMode('cash');
+      }
+    }
+  };
+  
+  continuousRecognition.onerror = (event) => {
+    // Only log serious errors, not no-speech
+    if (event.error !== 'no-speech') {
+      console.error('Continuous recognition error:', event.error);
+    }
+  };
+  
+  continuousRecognition.onend = () => {
+    isListeningForCommands = false;
+    log('🔇 Continuous recognition ended - restarting');
+    
+    // Auto-restart if it ends
+    setTimeout(() => {
+      startContinuousRecognition();
+    }, 1000);
+  };
+  
+  startContinuousRecognition();
+  return true;
+}
+
+// Start continuous listening
+function startContinuousRecognition() {
+  if (!continuousRecognition) return;
+  
+  try {
+    continuousRecognition.start();
+    log('🎙️ Continuous recognition started');
+  } catch (err) {
+    console.error('Error starting continuous recognition:', err);
+    
+    // If already started, stop and restart
+    if (err.message.includes('already started')) {
+      continuousRecognition.stop();
+      setTimeout(() => {
+        try {
+          continuousRecognition.start();
+        } catch (e) {
+          console.error('Failed to restart recognition:', e);
+        }
+      }, 500);
+    }
+  }
+}
+
+// Show visual indicator for wake word detection
+function showWakeWordIndicator(message) {
+  // Create or update indicator
+  let indicator = document.querySelector('.wake-indicator');
+  
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.className = 'wake-indicator';
+    document.body.appendChild(indicator);
+  }
+  
+  indicator.innerHTML = `<span class="wake-pulse"></span> ${message}`;
+  
+  // Make sure it's visible
+  indicator.style.display = 'flex';
+  indicator.style.opacity = '1';
+  
+  // Auto-hide after 3 seconds
+  setTimeout(() => {
+    indicator.style.opacity = '0';
+    setTimeout(() => {
+      if (document.body.contains(indicator)) {
+        indicator.style.display = 'none';
+      }
+    }, 300);
+  }, 3000);
+}
+
+// Simulate clicking the assistant button
+function simulateAssistantButtonClick() {
+  const voiceToggleBtn = document.getElementById('voiceToggleBtn');
+  if (voiceToggleBtn && !isListeningForVoice) {
+    log('🎙️ Auto-activating assistant');
+    toggleVoiceListening();
+  }
+}
+
+// Simulate clicking the camera button
+function simulateCameraButtonClick() {
+  if (!cameraActive) {
+    log('📷 Auto-starting camera');
+    startCamera();
+  } else {
+    log('📷 Camera already active');
+  }
+}
+
+// Handle scan command
+function handleScanCommand(transcript) {
+  // Start camera if needed
+  if (!cameraActive) {
+    log('📷 Starting camera for scan');
+    startCamera().then(() => {
+      // Wait for camera to initialize
+      setTimeout(() => {
+        // Now handle the detection
+        simulateAssistantButtonClick();
+        pushMsg('user', transcript);
+        handleVoiceQuery(transcript);
+      }, 1500);
+    });
+  } else {
+    // Camera already active, just do detection
+    simulateAssistantButtonClick();
+    pushMsg('user', transcript);
+    handleVoiceQuery(transcript);
+  }
+}
+
+// Start continuous recognition on page load
+document.addEventListener('DOMContentLoaded', () => {
+  // ...existing code...
+  
+  // Start continuous recognition with a short delay
+  setTimeout(() => {
+    initContinuousRecognition();
+  }, 2000);
+});
+
+// Add CSS for voice feedback
+const voiceFeedbackStyle = document.createElement('style');
+voiceFeedbackStyle.textContent = `
+.wake-indicator {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.95) 0%, rgba(124, 58, 237, 0.95) 100%);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  z-index: 9999;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+  transition: opacity 0.3s ease;
+}
+.wake-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+`;
+document.head.appendChild(voiceFeedbackStyle);
+
+// Add command helper display
+function showCommandHelper() {
+  const helper = document.createElement('div');
+  helper.className = 'command-helper';
+  helper.innerHTML = `
+    <h3>Available Voice Commands</h3>
+    <div class="command-section">
+      <h4>Wake Assistant:</h4>
+      <ul>${VOICE_COMMANDS.ASSISTANT_WAKE_WORDS.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
+    </div>
+    <div class="command-section">
+      <h4>Start Camera:</h4>
+      <ul>${VOICE_COMMANDS.CAMERA_ACTIVATION.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
+    </div>
+    <div class="command-section">
+      <h4>Scan Item:</h4>
+      <ul>${VOICE_COMMANDS.SCAN_COMMANDS.map(cmd => `<li>${cmd}</li>`).join('')}</ul>
+    </div>
+    <button class="close-helper">✕</button>
+  `;
+  
+  helper.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    max-width: 300px;
+    z-index: 9999;
+    font-family: 'Inter', sans-serif;
+  `;
+  
+  const closeBtn = helper.querySelector('.close-helper');
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: #888;
+  `;
+  
+  closeBtn.addEventListener('click', () => {
+    helper.remove();
+  });
+  
+  document.body.appendChild(helper);
+  
+  // Auto-hide after 20 seconds
+  setTimeout(() => {
+    if (document.body.contains(helper)) {
+      helper.style.opacity = '0';
+      helper.style.transform = 'translateY(20px)';
+      helper.style.transition = 'opacity 0.3s, transform 0.3s';
+      setTimeout(() => helper.remove(), 300);
+    }
+  }, 20000);
+}
+
+// Show command helper after a short delay
+setTimeout(showCommandHelper, 5000);
+
+// ========================================
+// FINAL TOUCHES
+// ========================================
+
+// Minor UI/UX improvements
+document.addEventListener('DOMContentLoaded', () => {
+  // Smooth scroll to top for long pages
+  const scrollToTopBtn = document.getElementById('scrollToTop');
+  if (scrollToTopBtn) {
+    scrollToTopBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+  
+  // Tooltips for buttons
+  const tooltips = {
+    'startCamera': 'Start or stop the camera',
+    'toggleFoodInfo': 'Show or hide food information',
+    'emergencyBtn': 'Activate emergency mode',
+    'closeEmergencyBtn': 'Close emergency overlay',
+    'cancelEmergencyBtn': 'Cancel emergency actions',
+    'languageSelect': 'Select language for responses'
+  };
+  
+  Object.keys(tooltips).forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.setAttribute('title', tooltips[id]);
+      element.classList.add('has-tooltip');
+    }
+  });
+});
+
+// Accessibility enhancements
+document.addEventListener('DOMContentLoaded', () => {
+  // ARIA roles and properties
+  const setAria = (id, role, props) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.setAttribute('role', role);
+      Object.entries(props).forEach(([key, value]) => {
+        element.setAttribute(`aria-${key}`, value);
+      });
+    }
+  };
+  
+  setAria('video', 'region', { label: 'Camera feed' });
+  setAria('canvas', 'img', { label: 'Nutritional analysis result' });
+  setAria('chatWindow', 'log', { label: 'Chat messages' });
+  setAria('foodInfoContainer', 'region', { label: 'Food information' });
+  setAria('emergencyOverlay', 'dialog', { label: 'Emergency actions' });
+});
+
+// Log final initialization
+log('A-eye fully initialized with voice command automation');
