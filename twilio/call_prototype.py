@@ -74,45 +74,88 @@ def init_twilio_client(cfg):
         return None
 
 
-def place_emergency(client: Client, from_number: str, to_number: str, reason: str, location: str) -> bool:
+def place_emergency(client: Client, from_number: str, to_number: str, reason: str, location: str, mode: str='both') -> bool:
     """
-    Places a call and sends an SMS. Returns True if either succeeded.
+    Places a call and/or sends an SMS based on mode. Returns True if the requested operations succeeded.
+    Args:
+        mode: 'call', 'sms', or 'both'
     """
     # Build TwiML (URL-encoded or direct twiml string)
-    # We’ll pass direct XML via 'twiml' param.
+    # We'll pass direct XML via 'twiml' param.
     spoken = f"Emergency alert from AEye. {reason}. Location: {location}. Please respond immediately."
 
     call_ok = False
     sms_ok = False
 
-    # Voice call
-    try:
-        call = client.calls.create(
-            to=to_number,
-            from_=from_number,
-            twiml=f"<Response><Say voice='alice'>{spoken}</Say></Response>"
-        )
-        print("📞 Call SID:", call.sid)
-        call_ok = True
-    except Exception as e:
-        print("❌ Call failed:", str(e))
-        print("   → On a trial account, 'to' must be a Verified Caller ID.")
+    # Voice call if requested
+    if mode in ['call', 'both']:
+        try:
+            call = client.calls.create(
+                to=to_number,
+                from_=from_number,
+                twiml=f"<Response><Say voice='alice'>{spoken}</Say></Response>"
+            )
+            print("📞 Call SID:", call.sid)
+            call_ok = True
+        except Exception as e:
+            print("❌ Call failed:", str(e))
+            print("   → On a trial account, 'to' must be a Verified Caller ID.")
 
-    # SMS
-    try:
-        msg = client.messages.create(
-            to=to_number,
-            from_=from_number,
-            body=f"AEye EMERGENCY: {reason}. Location: {location}"
-        )
-        print("✉️  SMS SID:", msg.sid)
-        sms_ok = True
-    except Exception as e:
-        print("❌ SMS failed:", str(e))
-        print("   → On a trial account, 'to' must be a Verified Caller ID.")
-        print("   → Also ensure your Twilio number supports SMS (check console).")
+    # SMS if requested
+    if mode in ['sms', 'both']:
+        try:
+            print("\n📱 Attempting to send SMS...")
+            print(f"   From: {from_number}")
+            print(f"   To: {to_number}")
+            
+            # Verify phone numbers are in E.164 format
+            if not (from_number.startswith('+') and to_number.startswith('+')):
+                raise ValueError("Phone numbers must be in E.164 format (e.g., +1234567890)")
+            
+            msg = client.messages.create(
+                to=to_number,
+                from_=from_number,
+                body=f"🚨 AEye EMERGENCY ALERT:\n\nReason: {reason}\nLocation: {location}\n\nThis is an automated alert. Please respond immediately."
+            )
+            
+            # Check message status
+            message_status = client.messages(msg.sid).fetch()
+            print(f"✉️  SMS Status: {message_status.status}")
+            print(f"   SID: {msg.sid}")
+            
+            if message_status.error_code:
+                print(f"⚠️  Error Code: {message_status.error_code}")
+                print(f"   Error Message: {message_status.error_message}")
+                sms_ok = False
+            else:
+                sms_ok = True
+                
+        except ValueError as ve:
+            print(f"❌ SMS Configuration Error: {str(ve)}")
+        except Exception as e:
+            print("❌ SMS failed:", str(e))
+            print("\nTroubleshooting Guide:")
+            print("1. Check if your Twilio number can send SMS:")
+            print("   → Go to https://console.twilio.com")
+            print("   → Click Phone Numbers > Manage > Active numbers")
+            print("   → Verify SMS is enabled for your number")
+            print("\n2. For trial accounts:")
+            print("   → The 'to' number must be a verified phone number")
+            print("   → Add it at: https://console.twilio.com/us1/verification/list")
+            print("\n3. Check your Twilio balance")
+            try:
+                balance = client.api.accounts(client.account_sid).fetch().balance
+                print(f"\nCurrent Balance: ${balance if balance else 'unknown'}")
+            except:
+                print("\nCould not fetch balance. Please check console.")
 
-    return call_ok or sms_ok
+    # Consider success based on requested mode
+    if mode == 'both':
+        return call_ok and sms_ok  # Both must succeed
+    elif mode == 'call':
+        return call_ok  # Only call must succeed
+    else:  # sms
+        return sms_ok  # Only SMS must succeed
 
 
 def main():
@@ -120,9 +163,11 @@ def main():
     if not validate_cfg(cfg):
         sys.exit(1)
 
-    parser = argparse.ArgumentParser(description="AEye Twilio Emergency Caller")
+    parser = argparse.ArgumentParser(description="AEye Twilio Emergency Notifications")
     parser.add_argument("--reason", default="User requested help via AEye", help="Reason included in call/SMS")
     parser.add_argument("--to", help="Override AEYE_EMERGENCY_CONTACT, E.164 (+1...)")
+    parser.add_argument("--mode", choices=['call', 'sms', 'both'], default='both',
+                       help="Send via: call, sms, or both (default: both)")
     args = parser.parse_args()
 
     to_number = args.to.strip() if args.to else cfg["to_number"]
@@ -135,12 +180,24 @@ def main():
         sys.exit(1)
 
     print(f"\nFrom: {cfg['from_number']}  →  To: {to_number}")
-    ok = place_emergency(client, cfg["from_number"], to_number, args.reason, cfg["location"])
+    print(f"Mode: {args.mode.upper()}")
+    
+    ok = place_emergency(
+        client, 
+        cfg["from_number"], 
+        to_number, 
+        args.reason, 
+        cfg["location"],
+        mode=args.mode
+    )
 
     if ok:
-        print("\n✅ Emergency notifications sent.")
+        if args.mode == 'both':
+            print("\n✅ Emergency call and SMS sent successfully.")
+        else:
+            print(f"\n✅ Emergency {args.mode.upper()} sent successfully.")
     else:
-        print("\n⚠️  Emergency failed (see errors above).")
+        print(f"\n⚠️  Emergency {args.mode.upper()} failed (see errors above).")
 
 
 if __name__ == "__main__":
